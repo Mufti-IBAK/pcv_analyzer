@@ -317,6 +317,9 @@
             manualCanvas.addEventListener('mousemove', handleCanvasMouseMove);
             manualCanvas.addEventListener('mouseup', handleCanvasMouseUp);
             manualCanvas.addEventListener('mouseleave', handleCanvasMouseUp);
+            
+            // Prevent context menu on right-click
+            manualCanvas.addEventListener('contextmenu', e => e.preventDefault());
 
             document.getElementById('resetBoundaries').addEventListener('click', resetBoundaries);
         }
@@ -618,54 +621,143 @@
             }
         }
 
+        function drawMedicalGrid() {
+            // Professional medical measurement grid
+            const gridSpacing = 10; // 10 pixels per mm (approximate)
+            const majorGridSpacing = 50; // Every 5mm as major lines
+            
+            // Background
+            manualCtx.fillStyle = '#f8f9fa';
+            manualCtx.fillRect(0, 0, manualCanvas.width, manualCanvas.height);
+            
+            // Minor grid lines (1mm)
+            manualCtx.strokeStyle = '#e9ecef';
+            manualCtx.lineWidth = 0.5;
+            
+            for (let x = 0; x <= manualCanvas.width; x += gridSpacing) {
+                manualCtx.beginPath();
+                manualCtx.moveTo(x, 0);
+                manualCtx.lineTo(x, manualCanvas.height);
+                manualCtx.stroke();
+            }
+            
+            for (let y = 0; y <= manualCanvas.height; y += gridSpacing) {
+                manualCtx.beginPath();
+                manualCtx.moveTo(0, y);
+                manualCtx.lineTo(manualCanvas.width, y);
+                manualCtx.stroke();
+            }
+            
+            // Major grid lines (5mm)
+            manualCtx.strokeStyle = '#dee2e6';
+            manualCtx.lineWidth = 1;
+            
+            for (let x = 0; x <= manualCanvas.width; x += majorGridSpacing) {
+                manualCtx.beginPath();
+                manualCtx.moveTo(x, 0);
+                manualCtx.lineTo(x, manualCanvas.height);
+                manualCtx.stroke();
+            }
+            
+            for (let y = 0; y <= manualCanvas.height; y += majorGridSpacing) {
+                manualCtx.beginPath();
+                manualCtx.moveTo(0, y);
+                manualCtx.lineTo(manualCanvas.width, y);
+                manualCtx.stroke();
+            }
+            
+            // Measurement labels
+            manualCtx.fillStyle = '#6c757d';
+            manualCtx.font = '10px Arial';
+            
+            // Vertical measurements (every 10mm)
+            for (let y = majorGridSpacing * 2; y <= manualCanvas.height; y += majorGridSpacing * 2) {
+                const mm = Math.round((y / gridSpacing));
+                manualCtx.fillText(mm + 'mm', 5, y - 2);
+            }
+            
+            // Horizontal measurements (every 10mm)
+            for (let x = majorGridSpacing * 2; x <= manualCanvas.width; x += majorGridSpacing * 2) {
+                const mm = Math.round((x / gridSpacing));
+                manualCtx.fillText(mm + 'mm', x - 8, 15);
+            }
+        }
+        
         function drawManualCanvas() {
             if (!canvasImage) return;
             
             // Clear canvas
             manualCtx.clearRect(0, 0, manualCanvas.width, manualCanvas.height);
             
+            // Draw professional medical grid background
+            drawMedicalGrid();
+            
             // Draw image with slight transparency to make lines more visible
-            manualCtx.globalAlpha = 0.85;
+            manualCtx.globalAlpha = 0.75;
             manualCtx.drawImage(canvasImage, 0, 0);
             manualCtx.globalAlpha = 1.0;
             
-            // Draw boundary lines and handles
+            // Draw enhanced boundary lines across the grid
             const colors = {
-                plasma_top_y: '#FFD700',
-                rbc_top_y: '#00FF00',
-                rbc_bottom_y: '#FF0000'
+                plasma_top_y: '#FFD700',    // Gold - Plasma boundary
+                rbc_top_y: '#22C55E',       // Green - RBC top boundary  
+                rbc_bottom_y: '#EF4444'     // Red - RBC bottom boundary
             };
             
             const labels = {
-                plasma_top_y: 'Plasma Top',
-                rbc_top_y: 'RBC Top',
-                rbc_bottom_y: 'RBC Bottom'
+                plasma_top_y: 'Plasma Top (A)',
+                rbc_top_y: 'RBC Top (B)',
+                rbc_bottom_y: 'RBC Bottom (C)'
             };
             
             for (const [boundary, y] of Object.entries(boundaries)) {
                 const color = colors[boundary];
                 
-                // Draw full-width line with shadow for visibility
-                manualCtx.shadowColor = 'rgba(0,0,0,0.5)';
-                manualCtx.shadowBlur = 3;
+                // Draw full-width measurement line with enhanced visibility
+                manualCtx.shadowColor = 'rgba(0,0,0,0.7)';
+                manualCtx.shadowBlur = 4;
                 manualCtx.shadowOffsetY = 2;
                 
+                // Main measurement line
                 manualCtx.strokeStyle = color;
-                manualCtx.lineWidth = 4;
+                manualCtx.lineWidth = 3;
+                manualCtx.setLineDash([]);
                 manualCtx.beginPath();
                 manualCtx.moveTo(0, y);
                 manualCtx.lineTo(manualCanvas.width, y);
                 manualCtx.stroke();
+                
+                // Dashed extension lines for precision
+                manualCtx.setLineDash([5, 5]);
+                manualCtx.strokeStyle = color;
+                manualCtx.lineWidth = 1;
+                manualCtx.globalAlpha = 0.6;
+                manualCtx.beginPath();
+                manualCtx.moveTo(0, y - 3);
+                manualCtx.lineTo(manualCanvas.width, y - 3);
+                manualCtx.moveTo(0, y + 3);
+                manualCtx.lineTo(manualCanvas.width, y + 3);
+                manualCtx.stroke();
+                manualCtx.setLineDash([]);
+                manualCtx.globalAlpha = 1.0;
                 
                 // Reset shadow
                 manualCtx.shadowColor = 'transparent';
                 manualCtx.shadowBlur = 0;
                 manualCtx.shadowOffsetY = 0;
                 
-                // Draw handle (larger for better interaction)
+                // Draw measurement handle (enhanced for better UX)
+                const handleX = manualCanvas.width - 35;
+                
+                // Handle shadow
+                manualCtx.shadowColor = 'rgba(0,0,0,0.3)';
+                manualCtx.shadowBlur = 3;
+                manualCtx.shadowOffsetY = 2;
+                
+                // Outer handle circle
                 manualCtx.fillStyle = color;
                 manualCtx.beginPath();
-                manualCtx.arc(manualCanvas.width - 30, y, 12, 0, 2 * Math.PI);
+                manualCtx.arc(handleX, y, 14, 0, 2 * Math.PI);
                 manualCtx.fill();
                 
                 // Handle border
@@ -674,61 +766,102 @@
                 manualCtx.stroke();
                 
                 // Inner handle dot
-                manualCtx.fillStyle = '#333333';
+                manualCtx.fillStyle = '#FFFFFF';
                 manualCtx.beginPath();
-                manualCtx.arc(manualCanvas.width - 30, y, 4, 0, 2 * Math.PI);
+                manualCtx.arc(handleX, y, 5, 0, 2 * Math.PI);
                 manualCtx.fill();
                 
-                // Draw label with better contrast
-                manualCtx.fillStyle = '#000000';
+                // Reset shadow
+                manualCtx.shadowColor = 'transparent';
+                manualCtx.shadowBlur = 0;
+                manualCtx.shadowOffsetY = 0;
+                
+                // Draw enhanced label with medical precision
+                const labelX = 15;
+                
+                // Label background
+                manualCtx.fillStyle = 'rgba(255,255,255,0.9)';
+                manualCtx.fillRect(labelX - 5, y - 25, 120, 20);
+                
+                // Label border
                 manualCtx.strokeStyle = color;
-                manualCtx.lineWidth = 4;
-                manualCtx.font = 'bold 16px Arial';
-                manualCtx.strokeText(labels[boundary], 10, y - 10);
-                manualCtx.fillStyle = '#FFFFFF';
-                manualCtx.fillText(labels[boundary], 10, y - 10);
+                manualCtx.lineWidth = 1;
+                manualCtx.strokeRect(labelX - 5, y - 25, 120, 20);
+                
+                // Label text
+                manualCtx.fillStyle = color;
+                manualCtx.font = 'bold 12px Arial';
+                manualCtx.fillText(labels[boundary], labelX, y - 10);
+                
+                // Measurement value
+                manualCtx.fillStyle = '#374151';
+                manualCtx.font = '10px monospace';
+                const mmValue = Math.round((y / 10)); // Assuming 10px = 1mm
+                manualCtx.fillText(`${mmValue}mm`, labelX, y - 28);
             }
         }
 
         function handleCanvasMouseDown(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
             const rect = manualCanvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const scaleX = manualCanvas.width / rect.width;
+            const scaleY = manualCanvas.height / rect.height;
+            
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
+            
+            console.log(`Mouse down at: ${x}, ${y}`);
+            console.log('Current boundaries:', boundaries);
             
             // Check if clicking on any handle or line
             for (const [boundary, boundaryY] of Object.entries(boundaries)) {
-                const handleX = manualCanvas.width - 30;
+                const handleX = manualCanvas.width - 35;
                 const handleDistance = Math.sqrt(Math.pow(x - handleX, 2) + Math.pow(y - boundaryY, 2));
                 const lineDistance = Math.abs(y - boundaryY);
                 
+                console.log(`${boundary}: handleDist=${handleDistance.toFixed(1)}, lineDist=${lineDistance.toFixed(1)}`);
+                
                 // Allow clicking on handle or anywhere on the line
-                if (handleDistance <= 15 || lineDistance <= 8) {
+                if (handleDistance <= 18 || lineDistance <= 10) {
                     isDragging = boundary;
                     manualCanvas.style.cursor = 'grabbing';
+                    console.log(`Started dragging: ${boundary}`);
                     break;
                 }
             }
         }
 
         function handleCanvasMouseMove(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            
             const rect = manualCanvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const scaleX = manualCanvas.width / rect.width;
+            const scaleY = manualCanvas.height / rect.height;
+            
+            const x = (e.clientX - rect.left) * scaleX;
+            const y = (e.clientY - rect.top) * scaleY;
             
             if (isDragging) {
-                // Update boundary position
-                boundaries[isDragging] = Math.max(10, Math.min(manualCanvas.height - 10, y));
+                // Update boundary position with constraints
+                const constrainedY = Math.max(10, Math.min(manualCanvas.height - 10, y));
+                boundaries[isDragging] = constrainedY;
+                
+                console.log(`Dragging ${isDragging} to Y: ${constrainedY}`);
+                
                 drawManualCanvas();
                 updateManualResults();
             } else {
                 // Check if hovering over handle or line
                 let overInteractive = false;
                 for (const [boundary, boundaryY] of Object.entries(boundaries)) {
-                    const handleX = manualCanvas.width - 30;
+                    const handleX = manualCanvas.width - 35;
                     const handleDistance = Math.sqrt(Math.pow(x - handleX, 2) + Math.pow(y - boundaryY, 2));
                     const lineDistance = Math.abs(y - boundaryY);
                     
-                    if (handleDistance <= 15 || lineDistance <= 8) {
+                    if (handleDistance <= 18 || lineDistance <= 10) {
                         overInteractive = true;
                         break;
                     }
@@ -737,7 +870,10 @@
             }
         }
 
-        function handleCanvasMouseUp() {
+        function handleCanvasMouseUp(e) {
+            if (isDragging) {
+                console.log(`Stopped dragging: ${isDragging}`);
+            }
             isDragging = null;
             manualCanvas.style.cursor = 'crosshair';
         }

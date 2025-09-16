@@ -86,9 +86,17 @@ class EnhancedPCVAnalyzer:
                 )
             
             tube_rect = tube_result['rect']
-            tube_roi = image_rgb[tube_rect[1]:tube_rect[1]+tube_rect[3], 
-                               tube_rect[0]:tube_rect[0]+tube_rect[2]]
+            
+            # Ensure vertical orientation with blue plasticine at bottom
+            oriented_image, oriented_rect = self._ensure_vertical_orientation_advanced(image_rgb, tube_rect)
+            
+            tube_roi = oriented_image[oriented_rect[1]:oriented_rect[1]+oriented_rect[3], 
+                                    oriented_rect[0]:oriented_rect[0]+oriented_rect[2]]
             self.debug_images['tube_roi'] = tube_roi
+            self.debug_images['oriented_image'] = oriented_image
+            
+            # Update tube_rect to oriented coordinates
+            tube_rect = oriented_rect
             
             # Stage 2: Advanced Vertical Intensity Profiling
             profiles = self._create_enhanced_profiles(tube_roi)
@@ -193,6 +201,87 @@ class EnhancedPCVAnalyzer:
             return {'success': True, 'rect': tube_rect, 'method': 'intelligent_fallback', 'methods_attempted': methods_attempted}
         
         return {'success': False, 'rect': None, 'method': 'none', 'methods_attempted': methods_attempted}
+    
+    def _ensure_vertical_orientation_advanced(self, image: np.ndarray, roi: Tuple[int, int, int, int]) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+        """Advanced vertical orientation with plasticine detection"""
+        if image is None or image.size == 0:
+            raise ValueError("Empty image provided")
+            
+        x, y, w, h = roi
+        
+        # Validate ROI bounds
+        img_h, img_w = image.shape[:2]
+        x = max(0, min(x, img_w - 1))
+        y = max(0, min(y, img_h - 1))
+        w = min(w, img_w - x)
+        h = min(h, img_h - y)
+        
+        if w <= 0 or h <= 0:
+            return image, (x, y, max(1, w), max(1, h))
+        
+        # Extract tube ROI with bounds checking
+        tube_roi = image[y:y+h, x:x+w]
+        
+        if tube_roi.size == 0:
+            return image, roi
+            
+        # Check if tube needs rotation (horizontal to vertical)
+        if w > h:  # Horizontal tube
+            rotated_image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            new_height, new_width = rotated_image.shape[:2]
+            new_x = y
+            new_y = new_width - (x + w)
+            new_w = h
+            new_h = w
+            new_roi = (new_x, new_y, new_w, new_h)
+            return self._ensure_vertical_orientation_advanced(rotated_image, new_roi)
+        
+        # Advanced plasticine detection for orientation
+        plasticine_bottom_score = self._detect_plasticine_position(tube_roi, 'bottom')
+        plasticine_top_score = self._detect_plasticine_position(tube_roi, 'top')
+        
+        # If plasticine detected at top more than bottom, flip tube
+        if plasticine_top_score > plasticine_bottom_score + 0.2:
+            rotated_image = cv2.rotate(image, cv2.ROTATE_180)
+            new_height, new_width = rotated_image.shape[:2]
+            new_x = new_width - (x + w)
+            new_y = new_height - (y + h)
+            new_roi = (new_x, new_y, w, h)
+            return rotated_image, new_roi
+        
+        return image, roi
+    
+    def _detect_plasticine_position(self, tube_roi: np.ndarray, position: str) -> float:
+        """Detect plasticine (blue/green) at specified position"""
+        if tube_roi.size == 0:
+            return 0.0
+            
+        h = tube_roi.shape[0]
+        if position == 'bottom':
+            section = tube_roi[int(h*0.8):, :] if h > 10 else tube_roi
+        else:  # top
+            section = tube_roi[:int(h*0.2), :] if h > 10 else tube_roi
+        
+        if section.size == 0:
+            return 0.0
+        
+        try:
+            # Convert to HSV for better color detection
+            hsv_section = cv2.cvtColor(section, cv2.COLOR_RGB2HSV)
+            
+            # Blue plasticine detection (hue 100-140)
+            blue_mask = cv2.inRange(hsv_section, np.array([100, 50, 50]), np.array([140, 255, 255]))
+            blue_score = np.sum(blue_mask) / (section.shape[0] * section.shape[1] * 255)
+            
+            # Green plasticine detection (hue 40-80)
+            green_mask = cv2.inRange(hsv_section, np.array([40, 50, 50]), np.array([80, 255, 255]))
+            green_score = np.sum(green_mask) / (section.shape[0] * section.shape[1] * 255)
+            
+            return max(blue_score, green_score)
+            
+        except Exception as e:
+            print(f"Plasticine detection error: {e}")
+            return 0.0
     
     def _detect_tube_by_advanced_edges(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
         """Advanced edge detection with morphological operations"""
@@ -647,17 +736,45 @@ class EnhancedPCVAnalyzer:
             if sat_grad > 10.0:
                 candidates.append((y, sat_grad * 0.05, 'saturation_drop'))
         
-        # Method 3: Blue channel increase (blue sealant)
+        # Method 3: Enhanced Blue Plasticine Detection
         for y in range(roi_height - 5, search_start, -1):
-            blue_increase = profiles['blue'][y] - profiles['blue'][y-5]
-            if blue_increase > 20:
-                candidates.append((y, blue_increase * 0.02, 'blue_increase'))
+            # Multi-criteria blue plasticine detection
+            blue_increase = profiles['blue'][y] - profiles['blue'][y-5] if y >= 5 else 0
+            hue_value = profiles['hue'][y]
+            saturation_value = profiles['saturation'][y]
+            
+            # Blue plasticine characteristics:
+            # - High blue channel value
+            # - Hue in blue range (100-140 in OpenCV HSV)
+            # - Moderate to high saturation
+            blue_score = 0
+            if blue_increase > 15:  # Blue channel increase
+                blue_score += blue_increase * 0.03
+            if 100 <= hue_value <= 140:  # Blue hue range
+                blue_score += 20
+            if saturation_value > 80:  # High saturation indicates vibrant blue
+                blue_score += saturation_value * 0.1
+            
+            if blue_score > 15:
+                candidates.append((y, blue_score * 0.05, 'blue_plasticine_detection'))
         
         # Method 4: A-channel change (green-red axis in LAB)
         for y in range(roi_height - 5, search_start, -1):
             a_grad = abs(profiles['gradients']['a_channel'][y])
             if a_grad > 3.0:
                 candidates.append((y, a_grad * 0.2, 'a_channel_change'))
+        
+        # Method 5: Blue Plasticine Texture Analysis
+        for y in range(roi_height - 10, search_start, -1):
+            if y >= 10:
+                # Analyze texture consistency (blue plasticine is usually uniform)
+                blue_variance = np.var(profiles['blue'][y-5:y+5])
+                hue_variance = np.var(profiles['hue'][y-5:y+5])
+                
+                # Low variance indicates uniform blue plasticine
+                if blue_variance < 100 and hue_variance < 5 and profiles['blue'][y] > 100:
+                    uniformity_score = (200 - blue_variance) * 0.01 + (10 - hue_variance) * 2
+                    candidates.append((y, uniformity_score, 'blue_plasticine_texture'))
         
         # Select best candidate
         if candidates:
@@ -715,15 +832,49 @@ class EnhancedPCVAnalyzer:
         return BoundaryResult(-1, 0.0, "failed")
     
     def _validate_boundaries(self, boundaries: Dict[str, BoundaryResult]) -> bool:
-        """Validate that boundaries are in logical order"""
+        """Enhanced boundary validation for vertical tube orientation"""
         plasma_top = boundaries.get('plasma_top', BoundaryResult(-1, 0, ""))
         rbc_top = boundaries.get('rbc_top', BoundaryResult(-1, 0, ""))
         rbc_bottom = boundaries.get('rbc_bottom', BoundaryResult(-1, 0, ""))
         
+        # Check if all boundaries were detected
         if plasma_top.y_position == -1 or rbc_top.y_position == -1 or rbc_bottom.y_position == -1:
             return False
         
-        return (plasma_top.y_position < rbc_top.y_position < rbc_bottom.y_position)
+        # Vertical orientation validation: A (plasma top) < B (RBC top) < C (RBC bottom)
+        if not (plasma_top.y_position < rbc_top.y_position < rbc_bottom.y_position):
+            return False
+        
+        # Enhanced validation checks for medical accuracy
+        # 1. Minimum distances between boundaries (avoid too close boundaries)
+        min_plasma_rbc_distance = 10  # At least 1mm between plasma and RBC
+        min_rbc_height = 20  # RBC layer should be at least 2mm thick
+        
+        plasma_to_rbc_distance = rbc_top.y_position - plasma_top.y_position
+        rbc_height = rbc_bottom.y_position - rbc_top.y_position
+        
+        if plasma_to_rbc_distance < min_plasma_rbc_distance:
+            return False
+        
+        if rbc_height < min_rbc_height:
+            return False
+        
+        # 2. Total height should be reasonable (not too small or too large)
+        total_height = rbc_bottom.y_position - plasma_top.y_position
+        if total_height < 50 or total_height > 500:  # 5mm to 50mm range
+            return False
+        
+        # 3. PCV should be in medically reasonable range
+        pcv = (rbc_height / total_height) * 100
+        if pcv < 10 or pcv > 70:  # Medical PCV range
+            return False
+        
+        # 4. Confidence scores should be reasonable
+        avg_confidence = (plasma_top.confidence + rbc_top.confidence + rbc_bottom.confidence) / 3
+        if avg_confidence < 0.3:  # At least 30% confidence
+            return False
+        
+        return True
     
     def _calculate_pcv_enhanced(self, boundaries: Dict[str, BoundaryResult], warnings: List[str]) -> Dict:
         """Calculate PCV with enhanced precision and validation"""
