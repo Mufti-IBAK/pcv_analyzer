@@ -581,24 +581,43 @@
         }
 
         function setupManualCorrection(data) {
-            if (data.debug_images && data.debug_images.tube_roi) {
+            console.log('Setting up manual correction:', data);
+            
+            // Always ensure we have tube_roi image, use oriented_image as fallback
+            const imageSource = data.debug_images?.tube_roi || data.debug_images?.oriented_image || data.debug_images?.original;
+            
+            if (imageSource) {
                 const img = new Image();
                 img.onload = function() {
+                    console.log('Image loaded for manual correction:', img.width, 'x', img.height);
                     canvasImage = img;
                     manualCanvas.width = img.width;
                     manualCanvas.height = img.height;
                     
-                    // Initialize boundaries based on automatic detection
-                    if (data.boundaries) {
-                        boundaries.plasma_top_y = data.boundaries.plasma_top?.y_position || 50;
-                        boundaries.rbc_top_y = data.boundaries.rbc_top?.y_position || 120;
-                        boundaries.rbc_bottom_y = data.boundaries.rbc_bottom?.y_position || 180;
+                    // Initialize boundaries based on automatic detection or defaults
+                    if (data.boundaries && Object.keys(data.boundaries).length > 0) {
+                        console.log('Using detected boundaries:', data.boundaries);
+                        boundaries.plasma_top_y = data.boundaries.plasma_top?.y_position || Math.floor(img.height * 0.1);
+                        boundaries.rbc_top_y = data.boundaries.rbc_top?.y_position || Math.floor(img.height * 0.3);
+                        boundaries.rbc_bottom_y = data.boundaries.rbc_bottom?.y_position || Math.floor(img.height * 0.8);
+                    } else {
+                        console.log('Using default boundary positions');
+                        // Use proportional defaults based on image height
+                        boundaries.plasma_top_y = Math.floor(img.height * 0.1);
+                        boundaries.rbc_top_y = Math.floor(img.height * 0.3);
+                        boundaries.rbc_bottom_y = Math.floor(img.height * 0.8);
                     }
                     
+                    console.log('Boundaries set to:', boundaries);
                     drawManualCanvas();
                     updateManualResults();
                 };
-                img.src = data.debug_images.tube_roi;
+                img.onerror = function() {
+                    console.error('Failed to load image for manual correction');
+                };
+                img.src = imageSource;
+            } else {
+                console.error('No suitable image found for manual correction');
             }
         }
 

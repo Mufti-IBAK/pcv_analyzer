@@ -54,7 +54,7 @@ class EnhancedPCVAnalyzer:
         self._load_training_data()
         
     def analyze_image(self, image_path: str) -> AnalysisResult:
-        """Main analysis pipeline"""
+        """Sequential analysis pipeline: 1) Detect tube, 2) Make vertical, 3) Color-based PCV detection"""
         import time
         start_time = time.time()
         
@@ -72,81 +72,65 @@ class EnhancedPCVAnalyzer:
             # Convert BGR to RGB for processing
             image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             self.debug_images['original'] = image_rgb
-            
             warnings = []
             
-            # Pre-processing: Enhanced image preparation
-            processed_image = self._preprocess_image(image_rgb)
-            
-            # Stage 1: Enhanced Global Localization (Multiple Methods)
-            tube_result = self._find_tube_enhanced(processed_image, image_rgb)
-            if not tube_result['success']:
+            print("🔍 Step 1: Detecting tube boundaries...")
+            # STEP 1: DETECT TUBE ROI with enhanced detection
+            tube_rect = self._detect_tube_roi_robust(image_rgb)
+            if tube_rect is None:
                 return AnalysisResult(
                     pcv=0, hemoglobin=0, total_height=0, packed_height=0,
-                    boundaries={}, tube_rect=(0,0,0,0), detection_method="failed",
+                    boundaries={}, tube_rect=(0,0,0,0), detection_method="tube_detection_failed",
                     confidence_overall=0, processing_time_ms=int((time.time() - start_time) * 1000),
                     warnings=warnings, success=False, 
-                    error_message=f"Tube detection failed. Tried: {', '.join(tube_result['methods_attempted'])}"
+                    error_message="Failed to detect tube in image. Ensure tube is clearly visible."
                 )
             
-            tube_rect = tube_result['rect']
+            print(f"✅ Tube detected: {tube_rect}")
             
-            # Ensure vertical orientation with blue plasticine at bottom
-            oriented_image, oriented_rect = self._ensure_vertical_orientation_advanced(image_rgb, tube_rect)
+            print("🔄 Step 2: Ensuring vertical orientation...")
+            # STEP 2: MAKE TUBE VERTICAL with enhanced orientation detection
+            oriented_image, final_tube_rect = self._make_tube_vertical(image_rgb, tube_rect)
             
-            # Validate oriented rectangle bounds
-            x, y, w, h = oriented_rect
+            # Extract and validate tube ROI
+            x, y, w, h = final_tube_rect
             img_h, img_w = oriented_image.shape[:2]
             
-            if x < 0 or y < 0 or x + w > img_w or y + h > img_h or w <= 0 or h <= 0:
+            # Ensure bounds are valid
+            x = max(0, min(x, img_w - 1))
+            y = max(0, min(y, img_h - 1))
+            w = min(w, img_w - x)
+            h = min(h, img_h - y)
+            
+            if w <= 10 or h <= 10:
                 return AnalysisResult(
                     pcv=0, hemoglobin=0, total_height=0, packed_height=0,
-                    boundaries={}, tube_rect=(0,0,0,0), detection_method="invalid_roi",
+                    boundaries={}, tube_rect=(0,0,0,0), detection_method="invalid_tube_size",
                     confidence_overall=0, processing_time_ms=int((time.time() - start_time) * 1000),
                     warnings=warnings, success=False, 
-                    error_message=f"Invalid tube ROI bounds: {oriented_rect} for image size {img_w}x{img_h}"
+                    error_message=f"Tube too small: {w}x{h} pixels"
                 )
             
-            # Extract tube ROI safely
+            # Extract tube ROI
             tube_roi = oriented_image[y:y+h, x:x+w]
-            
-            # Validate tube ROI
-            if tube_roi.size == 0:
-                return AnalysisResult(
-                    pcv=0, hemoglobin=0, total_height=0, packed_height=0,
-                    boundaries={}, tube_rect=(0,0,0,0), detection_method="empty_roi",
-                    confidence_overall=0, processing_time_ms=int((time.time() - start_time) * 1000),
-                    warnings=warnings, success=False, 
-                    error_message="Empty tube ROI extracted"
-                )
-            
-            if len(tube_roi.shape) != 3 or tube_roi.shape[2] != 3:
-                return AnalysisResult(
-                    pcv=0, hemoglobin=0, total_height=0, packed_height=0,
-                    boundaries={}, tube_rect=(0,0,0,0), detection_method="invalid_roi_shape",
-                    confidence_overall=0, processing_time_ms=int((time.time() - start_time) * 1000),
-                    warnings=warnings, success=False, 
-                    error_message=f"Invalid tube ROI shape: {tube_roi.shape}. Expected (H,W,3)"
-                )
-            
             self.debug_images['tube_roi'] = tube_roi
             self.debug_images['oriented_image'] = oriented_image
             
-            # Update tube_rect to oriented coordinates
-            tube_rect = oriented_rect
+            print(f"✅ Tube oriented vertically: {final_tube_rect}")
             
-            # Stage 2: Advanced Vertical Intensity Profiling
-            profiles = self._create_enhanced_profiles(tube_roi)
+            print("🎨 Step 3: Color-based layer detection...")
+            # STEP 3: COLOR-BASED PCV CALCULATION
+            boundaries, confidence = self._detect_layers_by_color(tube_roi)
             
-            # Stage 3: Intelligent Boundary Detection
-            boundaries = self._detect_boundaries_enhanced(profiles, tube_roi.shape[0])
+            if not boundaries:
+                warnings.append("Color-based detection failed, using fallback method")
+                boundaries = self._fallback_boundary_detection(tube_roi)
+                confidence = 0.3
             
-            # Validate boundaries
-            if not self._validate_boundaries(boundaries):
-                warnings.append("Boundary relationships appear unusual")
+            # Calculate PCV from detected boundaries
+            pcv_result = self._calculate_pcv_from_boundaries(boundaries, tube_roi.shape[0], warnings)
             
-            # Calculate PCV using medical-grade precision
-            pcv_result = self._calculate_pcv_enhanced(boundaries, warnings)
+            print(f"✅ PCV calculated: {pcv_result['pcv']:.1f}%")
             
             # Create final result
             processing_time = int((time.time() - start_time) * 1000)
@@ -157,20 +141,23 @@ class EnhancedPCVAnalyzer:
                 total_height=pcv_result['total_height'],
                 packed_height=pcv_result['packed_height'],
                 boundaries=boundaries,
-                tube_rect=tube_rect,
-                detection_method=tube_result['method'],
-                confidence_overall=pcv_result['confidence'],
+                tube_rect=final_tube_rect,
+                detection_method="sequential_color_detection",
+                confidence_overall=confidence,
                 processing_time_ms=processing_time,
                 warnings=warnings,
                 success=True
             )
             
             # Generate annotated image
-            self._create_annotated_image(image_rgb, result)
+            self._create_annotated_image_enhanced(oriented_image, result, final_tube_rect)
             
             return result
             
         except Exception as e:
+            import traceback
+            print(f"❌ Error in analysis: {e}")
+            print(traceback.format_exc())
             return AnalysisResult(
                 pcv=0, hemoglobin=0, total_height=0, packed_height=0,
                 boundaries={}, tube_rect=(0,0,0,0), detection_method="error",
@@ -200,9 +187,466 @@ class EnhancedPCVAnalyzer:
             if os.path.exists(self.training_file):
                 with open(self.training_file, 'r') as f:
                     self.training_data = json.load(f)
+            else:
+                self.training_data = []
         except Exception as e:
             print(f"Failed to load training data: {e}")
             self.training_data = []
+    
+    def _detect_tube_roi_robust(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+        """Robust tube detection focusing on tube-like shapes and colors"""
+        print("  🔍 Analyzing image for tube-like structures...")
+        
+        # Method 1: Color-based detection for blood components
+        tube_rect = self._detect_by_blood_colors(image)
+        if tube_rect:
+            print(f"  ✅ Found tube via blood color detection: {tube_rect}")
+            return tube_rect
+            
+        # Method 2: Edge-based tube detection
+        tube_rect = self._detect_by_tube_edges(image)
+        if tube_rect:
+            print(f"  ✅ Found tube via edge detection: {tube_rect}")
+            return tube_rect
+        
+        # Method 3: Shape-based detection
+        tube_rect = self._detect_by_tube_shape(image)
+        if tube_rect:
+            print(f"  ✅ Found tube via shape detection: {tube_rect}")
+            return tube_rect
+            
+        print("  ⚠️ All detection methods failed")
+        return None
+    
+    def _detect_by_blood_colors(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+        """Detect tube by looking for characteristic blood colors"""
+        hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        
+        # Define color ranges for blood components
+        blood_masks = []
+        
+        # Red blood cells (deep red to bright red)
+        rbc_lower = np.array([0, 50, 50])
+        rbc_upper = np.array([10, 255, 255])
+        rbc_mask1 = cv2.inRange(hsv, rbc_lower, rbc_upper)
+        
+        rbc_lower2 = np.array([170, 50, 50])
+        rbc_upper2 = np.array([180, 255, 255])
+        rbc_mask2 = cv2.inRange(hsv, rbc_lower2, rbc_upper2)
+        
+        rbc_mask = cv2.bitwise_or(rbc_mask1, rbc_mask2)
+        blood_masks.append(rbc_mask)
+        
+        # Plasticine (blue/green at bottom)
+        plasticine_lower = np.array([80, 50, 50])  # Blue
+        plasticine_upper = np.array([130, 255, 255])
+        plasticine_mask = cv2.inRange(hsv, plasticine_lower, plasticine_upper)
+        blood_masks.append(plasticine_mask)
+        
+        # Plasma (yellowish)
+        plasma_lower = np.array([15, 30, 100])
+        plasma_upper = np.array([35, 255, 255])
+        plasma_mask = cv2.inRange(hsv, plasma_lower, plasma_upper)
+        blood_masks.append(plasma_mask)
+        
+        # Combine all masks
+        combined_mask = np.zeros_like(rbc_mask)
+        for mask in blood_masks:
+            combined_mask = cv2.bitwise_or(combined_mask, mask)
+        
+        # Find contours
+        contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        return self._find_best_tube_contour(contours, image.shape)
+    
+    def _detect_by_tube_edges(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+        """Detect tube by edge detection and morphology"""
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        
+        # Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Edge detection
+        edges = cv2.Canny(blurred, 50, 150)
+        
+        # Morphological operations to connect tube edges
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 10))  # Vertical kernel
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+        
+        # Find contours
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        return self._find_best_tube_contour(contours, image.shape)
+    
+    def _detect_by_tube_shape(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+        """Detect tube by looking for rectangular tube-like shapes"""
+        gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        
+        # Threshold to get binary image
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Find contours
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        return self._find_best_tube_contour(contours, image.shape)
+    
+    def _find_best_tube_contour(self, contours, image_shape) -> Optional[Tuple[int, int, int, int]]:
+        """Find the contour most likely to be a PCV tube"""
+        if not contours:
+            return None
+            
+        h, w = image_shape[:2]
+        best_contour = None
+        best_score = 0
+        
+        for contour in contours:
+            x, y, cw, ch = cv2.boundingRect(contour)
+            area = cw * ch
+            
+            # Skip tiny or huge areas
+            if area < (w * h * 0.05) or area > (w * h * 0.8):
+                continue
+            
+            # Calculate score based on tube-like properties
+            score = 0
+            aspect_ratio = ch / cw if cw > 0 else 0
+            
+            # Prefer vertical rectangles (tubes are usually vertical)
+            if aspect_ratio > 2.0:
+                score += 50
+            elif aspect_ratio > 1.5:
+                score += 30
+            elif aspect_ratio > 1.0:
+                score += 10
+            
+            # Prefer reasonable size (20-60% of image)
+            size_ratio = area / (w * h)
+            if 0.2 <= size_ratio <= 0.6:
+                score += 30
+            elif 0.1 <= size_ratio <= 0.8:
+                score += 15
+            
+            # Prefer center positioning
+            center_x = x + cw / 2
+            center_y = y + ch / 2
+            center_score = 20 * (1 - abs(center_x - w/2) / (w/2)) * 0.5
+            center_score += 20 * (1 - abs(center_y - h/2) / (h/2)) * 0.5
+            score += center_score
+            
+            if score > best_score:
+                best_score = score
+                best_contour = contour
+        
+        if best_contour is not None:
+            x, y, cw, ch = cv2.boundingRect(best_contour)
+            
+            # Add generous padding to capture full tube including plasticine
+            padding_x = int(cw * 0.2)  # 20% padding horizontal
+            padding_y = int(ch * 0.3)  # 30% padding vertical for plasticine
+            
+            x = max(0, x - padding_x)
+            y = max(0, y - padding_y)
+            cw = min(w - x, cw + 2 * padding_x)
+            ch = min(h - y, ch + 2 * padding_y)
+            
+            return (x, y, cw, ch)
+        
+        return None
+    
+    def _make_tube_vertical(self, image: np.ndarray, tube_rect: Tuple[int, int, int, int]) -> Tuple[np.ndarray, Tuple[int, int, int, int]]:
+        """Ensure tube is vertical with plasticine at bottom"""
+        x, y, w, h = tube_rect
+        
+        # If tube is horizontal (w > h), rotate 90 degrees
+        if w > h:
+            print("  🔄 Rotating horizontal tube to vertical")
+            rotated_image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            new_h, new_w = rotated_image.shape[:2]
+            
+            # Transform coordinates for 90° rotation
+            new_x = y
+            new_y = image.shape[1] - (x + w)
+            new_w = h
+            new_h = w
+            
+            # Ensure bounds are valid
+            new_x = max(0, min(new_x, new_w - 1))
+            new_y = max(0, min(new_y, new_h - 1))
+            new_w = min(new_w, new_w - new_x)
+            new_h = min(new_h, new_h - new_y)
+            
+            image = rotated_image
+            tube_rect = (new_x, new_y, new_w, new_h)
+        
+        # Check if plasticine is at top (should be at bottom)
+        x, y, w, h = tube_rect
+        tube_roi = image[y:y+h, x:x+w]
+        
+        if self._is_plasticine_at_top(tube_roi):
+            print("  🔄 Flipping tube (plasticine at top)")
+            image = cv2.rotate(image, cv2.ROTATE_180)
+            new_h, new_w = image.shape[:2]
+            
+            # Transform coordinates for 180° rotation
+            new_x = new_w - (x + w)
+            new_y = new_h - (y + h)
+            
+            tube_rect = (new_x, new_y, w, h)
+        
+        print("  ✅ Tube is now vertical with plasticine at bottom")
+        return image, tube_rect
+    
+    def _is_plasticine_at_top(self, tube_roi: np.ndarray) -> bool:
+        """Check if plasticine (blue/green) is at the top of the tube"""
+        if tube_roi.size == 0:
+            return False
+            
+        h = tube_roi.shape[0]
+        top_section = tube_roi[:h//4, :]  # Top 25%
+        bottom_section = tube_roi[3*h//4:, :]  # Bottom 25%
+        
+        def count_plasticine_pixels(section):
+            if section.size == 0:
+                return 0
+            hsv = cv2.cvtColor(section, cv2.COLOR_RGB2HSV)
+            # Blue/green range for plasticine
+            mask = cv2.inRange(hsv, np.array([80, 50, 50]), np.array([130, 255, 255]))
+            return np.sum(mask > 0)
+        
+        top_plasticine = count_plasticine_pixels(top_section)
+        bottom_plasticine = count_plasticine_pixels(bottom_section)
+        
+        return top_plasticine > bottom_plasticine * 1.5
+    
+    def _detect_layers_by_color(self, tube_roi: np.ndarray) -> Tuple[Dict[str, BoundaryResult], float]:
+        """Enhanced color-based layer detection"""
+        if tube_roi.size == 0:
+            return {}, 0.0
+            
+        try:
+            h = tube_roi.shape[0]
+            boundaries = {}
+            
+            # Convert to HSV for better color detection  
+            hsv = cv2.cvtColor(tube_roi, cv2.COLOR_RGB2HSV)
+            
+            print("  🔍 Analyzing tube layers...")
+            
+            # Step 1: Find plasticine (blue/green at bottom)
+            plasticine_y = self._find_plasticine_boundary(hsv, h)
+            
+            # Step 2: Find RBC boundaries (red layer)
+            rbc_bottom_y, rbc_top_y = self._find_rbc_boundaries(hsv, h, plasticine_y)
+            
+            # Step 3: Find plasma top
+            plasma_top_y = self._find_plasma_boundary(hsv, h, rbc_top_y)
+            
+            # Create boundary results
+            boundaries['plasma_top'] = BoundaryResult(plasma_top_y, 0.8, 'color_detection')
+            boundaries['rbc_top'] = BoundaryResult(rbc_top_y, 0.8, 'color_detection') 
+            boundaries['rbc_bottom'] = BoundaryResult(rbc_bottom_y, 0.8, 'color_detection')
+            
+            # Calculate confidence based on color distinctness
+            confidence = self._calculate_color_confidence(hsv, boundaries)
+            
+            print(f"  ✅ Color detection complete. Confidence: {confidence:.2f}")
+            return boundaries, confidence
+            
+        except Exception as e:
+            print(f"  ❌ Color detection failed: {e}")
+            return {}, 0.0
+    
+    def _find_plasticine_boundary(self, hsv: np.ndarray, height: int) -> int:
+        """Find plasticine (blue/green) boundary at bottom"""
+        # Search from bottom up
+        for y in range(height - 5, max(0, height - 50), -1):
+            row = hsv[y, :]
+            hue_vals = row[:, 0]
+            sat_vals = row[:, 1]
+            val_vals = row[:, 2]
+            
+            # Blue plasticine (hue 100-130)
+            blue_mask = ((hue_vals >= 100) & (hue_vals <= 130) & (sat_vals > 80))
+            blue_ratio = np.sum(blue_mask) / len(hue_vals)
+            
+            # Green plasticine (hue 50-80) 
+            green_mask = ((hue_vals >= 50) & (hue_vals <= 80) & (sat_vals > 70))
+            green_ratio = np.sum(green_mask) / len(hue_vals)
+            
+            if blue_ratio > 0.3 or green_ratio > 0.3:
+                print(f"  🔵 Found plasticine at y={y}")
+                return y
+                
+        # Fallback to near bottom
+        return height - 15
+    
+    def _find_rbc_boundaries(self, hsv: np.ndarray, height: int, plasticine_y: int) -> Tuple[int, int]:
+        """Find RBC layer boundaries (red blood cells)"""
+        # Search upward from plasticine to find red layer
+        rbc_bottom_y = plasticine_y
+        rbc_top_y = int(height * 0.3)  # Default
+        
+        # Find RBC bottom (transition from plasticine to red)
+        for y in range(plasticine_y - 5, max(0, plasticine_y - 100), -1):
+            row = hsv[y, :]
+            hue_vals = row[:, 0]
+            sat_vals = row[:, 1]
+            val_vals = row[:, 2]
+            
+            # Red characteristics (hue 0-15 or 165-180)
+            red_mask1 = ((hue_vals >= 0) & (hue_vals <= 15) & (sat_vals > 100) & (val_vals > 80))
+            red_mask2 = ((hue_vals >= 165) & (hue_vals <= 180) & (sat_vals > 100) & (val_vals > 80))
+            red_ratio = (np.sum(red_mask1) + np.sum(red_mask2)) / len(hue_vals)
+            
+            if red_ratio > 0.4:
+                rbc_bottom_y = y
+                break
+        
+        # Find RBC top (transition from red to plasma)
+        for y in range(rbc_bottom_y - 10, max(0, int(height * 0.1)), -1):
+            row = hsv[y, :]
+            hue_vals = row[:, 0]
+            sat_vals = row[:, 1]
+            val_vals = row[:, 2]
+            
+            # Look for decrease in red and increase in brightness (plasma)
+            red_mask1 = ((hue_vals >= 0) & (hue_vals <= 15) & (sat_vals > 80))
+            red_mask2 = ((hue_vals >= 165) & (hue_vals <= 180) & (sat_vals > 80))
+            red_ratio = (np.sum(red_mask1) + np.sum(red_mask2)) / len(hue_vals)
+            
+            # Plasma characteristics (yellowish, bright)
+            plasma_mask = ((hue_vals >= 15) & (hue_vals <= 40) & (val_vals > 120))
+            plasma_ratio = np.sum(plasma_mask) / len(hue_vals)
+            
+            if red_ratio < 0.3 and plasma_ratio > 0.2:
+                rbc_top_y = y
+                break
+        
+        print(f"  🔴 Found RBC layer: {rbc_top_y} to {rbc_bottom_y}")
+        return rbc_bottom_y, rbc_top_y
+    
+    def _find_plasma_boundary(self, hsv: np.ndarray, height: int, rbc_top_y: int) -> int:
+        """Find plasma top boundary"""
+        # Search upward from RBC top
+        for y in range(rbc_top_y - 5, max(0, int(height * 0.05)), -1):
+            row = hsv[y, :]
+            val_vals = row[:, 2]
+            
+            # Look for significant brightness drop (plasma to air)
+            avg_brightness = np.mean(val_vals)
+            if avg_brightness < 80:  # Dark area indicates air/background
+                print(f"  🟡 Found plasma top at y={y}")
+                return y
+        
+        # Fallback
+        return max(0, rbc_top_y - 30)
+    
+    def _calculate_color_confidence(self, hsv: np.ndarray, boundaries: Dict[str, BoundaryResult]) -> float:
+        """Calculate confidence based on color distinctness"""
+        try:
+            plasma_y = boundaries['plasma_top'].y_position
+            rbc_top_y = boundaries['rbc_top'].y_position
+            rbc_bottom_y = boundaries['rbc_bottom'].y_position
+            
+            # Sample colors at each layer
+            h = hsv.shape[0]
+            plasma_sample = hsv[max(0, plasma_y + 5):rbc_top_y - 5, :] if rbc_top_y > plasma_y + 10 else None
+            rbc_sample = hsv[rbc_top_y + 5:rbc_bottom_y - 5, :] if rbc_bottom_y > rbc_top_y + 10 else None
+            
+            confidence = 0.5  # Base confidence
+            
+            # Check plasma characteristics (yellowish, bright)
+            if plasma_sample is not None and plasma_sample.size > 0:
+                plasma_hue = np.median(plasma_sample[:, :, 0])
+                plasma_val = np.median(plasma_sample[:, :, 2])
+                if 15 <= plasma_hue <= 40 and plasma_val > 100:
+                    confidence += 0.2
+            
+            # Check RBC characteristics (red, dark)
+            if rbc_sample is not None and rbc_sample.size > 0:
+                rbc_hue = np.median(rbc_sample[:, :, 0])
+                rbc_val = np.median(rbc_sample[:, :, 2])
+                if (0 <= rbc_hue <= 15 or 165 <= rbc_hue <= 180) and rbc_val < 150:
+                    confidence += 0.2
+            
+            return min(1.0, confidence)
+            
+        except Exception:
+            return 0.3
+    
+    def _fallback_boundary_detection(self, tube_roi: np.ndarray) -> Dict[str, BoundaryResult]:
+        """Simple fallback boundary detection"""
+        h = tube_roi.shape[0]
+        
+        # Simple division approach
+        plasma_top_y = int(h * 0.1)
+        rbc_top_y = int(h * 0.3)
+        rbc_bottom_y = int(h * 0.8)
+        
+        return {
+            'plasma_top': BoundaryResult(plasma_top_y, 0.3, 'fallback'),
+            'rbc_top': BoundaryResult(rbc_top_y, 0.3, 'fallback'),
+            'rbc_bottom': BoundaryResult(rbc_bottom_y, 0.3, 'fallback')
+        }
+    
+    def _calculate_pcv_from_boundaries(self, boundaries: Dict[str, BoundaryResult], tube_height: int, warnings: List[str]) -> Dict:
+        """Calculate PCV from detected boundaries"""
+        plasma_top = boundaries.get('plasma_top')
+        rbc_top = boundaries.get('rbc_top')
+        rbc_bottom = boundaries.get('rbc_bottom')
+        
+        if not all([plasma_top, rbc_top, rbc_bottom]):
+            return {'pcv': 0.0, 'hemoglobin': 0.0, 'total_height': 0, 'packed_height': 0}
+        
+        total_height = rbc_bottom.y_position - plasma_top.y_position
+        packed_height = rbc_bottom.y_position - rbc_top.y_position
+        
+        if total_height <= 0:
+            warnings.append("Invalid boundary measurements")
+            return {'pcv': 0.0, 'hemoglobin': 0.0, 'total_height': 0, 'packed_height': 0}
+        
+        pcv = (packed_height / total_height) * 100.0
+        hemoglobin = pcv / 3.0
+        
+        # Validate ranges
+        if pcv < 10 or pcv > 70:
+            warnings.append(f"PCV ({pcv:.1f}%) outside normal range")
+        
+        return {
+            'pcv': round(pcv, 1),
+            'hemoglobin': round(hemoglobin, 1),
+            'total_height': total_height,
+            'packed_height': packed_height
+        }
+    
+    def _create_annotated_image_enhanced(self, image: np.ndarray, result: AnalysisResult, tube_rect: Tuple[int, int, int, int]) -> None:
+        """Create enhanced annotated image"""
+        annotated = image.copy()
+        x, y, w, h = tube_rect
+        
+        # Draw tube boundary
+        cv2.rectangle(annotated, (x, y), (x + w, y + h), (0, 255, 255), 2)
+        
+        # Draw boundaries
+        colors = {
+            'plasma_top': (255, 255, 0),
+            'rbc_top': (0, 255, 0),
+            'rbc_bottom': (255, 0, 0)
+        }
+        
+        for name, boundary in result.boundaries.items():
+            if boundary.y_position >= 0:
+                color = colors.get(name, (255, 255, 255))
+                line_y = y + boundary.y_position
+                cv2.line(annotated, (x, line_y), (x + w, line_y), color, 2)
+                
+                # Add label
+                cv2.putText(annotated, name, (x - 80, line_y), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+        
+        # Add PCV text
+        cv2.putText(annotated, f"PCV: {result.pcv:.1f}%", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+        
+        self.debug_images['annotated'] = annotated
     
     def _preprocess_image(self, image: np.ndarray) -> np.ndarray:
         """Enhanced image preprocessing with multiple techniques"""
