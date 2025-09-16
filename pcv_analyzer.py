@@ -324,66 +324,124 @@ class EnhancedPCVAnalyzer:
         return self._filter_tube_contours(contours, image.shape)
     
     def _detect_tube_by_enhanced_color(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
-        """Enhanced color-based detection with multiple color spaces"""
-        # Convert to multiple color spaces
+        """Enhanced color-based detection with robust background removal"""
+        # Step 1: Advanced background removal for any background color
+        tube_mask = self._remove_background_advanced(image)
+        
+        # Step 2: Detect tube-specific colors within the mask
         hsv = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
         lab = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
         
-        masks = []
+        tube_content_masks = []
         
-        # 1. Blue sealant detection (multiple blue ranges)
-        blue_ranges = [
-            ([100, 50, 50], [130, 255, 255]),   # Standard blue
-            ([90, 60, 60], [120, 255, 255]),    # Darker blue  
-            ([110, 40, 40], [140, 255, 255]),   # Lighter blue
+        # Enhanced plasticine detection (blue/green)
+        plasticine_ranges = [
+            ([100, 50, 50], [140, 255, 255]),   # Blue plasticine
+            ([40, 50, 50], [80, 255, 255]),     # Green plasticine
         ]
         
-        for lower, upper in blue_ranges:
-            mask_blue = cv2.inRange(hsv, np.array(lower), np.array(upper))
-            masks.append(mask_blue)
+        for lower, upper in plasticine_ranges:
+            mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+            tube_content_masks.append(mask)
         
-        # 2. Red blood cell detection
-        red_ranges = [
-            ([0, 120, 120], [10, 255, 255]),    # Red range 1
-            ([170, 120, 120], [180, 255, 255]), # Red range 2
+        # Enhanced RBC detection (red shades)
+        rbc_ranges = [
+            ([0, 80, 80], [15, 255, 255]),      # Bright red
+            ([165, 80, 80], [180, 255, 255]),   # Deep red
+            ([0, 40, 60], [15, 255, 200]),      # Dark red
         ]
         
-        for lower, upper in red_ranges:
-            mask_red = cv2.inRange(hsv, np.array(lower), np.array(upper))
-            masks.append(mask_red)
+        for lower, upper in rbc_ranges:
+            mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+            tube_content_masks.append(mask)
         
-        # 3. Glass tube detection (looking for edges/transparency)
-        # Detect glass-like regions using color variance
+        # Plasma/buffy coat detection (pale/yellow)
+        plasma_ranges = [
+            ([15, 20, 100], [35, 150, 255]),    # Yellow plasma
+            ([0, 0, 150], [180, 50, 255]),      # Pale/white buffy coat
+        ]
+        
+        for lower, upper in plasma_ranges:
+            mask = cv2.inRange(hsv, np.array(lower), np.array(upper))
+            tube_content_masks.append(mask)
+        
+        # Combine tube content masks
+        tube_content = np.zeros_like(tube_mask)
+        for mask in tube_content_masks:
+            tube_content = cv2.bitwise_or(tube_content, mask)
+        
+        # Combine with background-removed mask
+        final_mask = cv2.bitwise_and(tube_content, tube_mask)
+        
+        # Morphological operations to clean up
+        kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 15))
+        final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_CLOSE, kernel_close)
+        
+        kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        final_mask = cv2.morphologyEx(final_mask, cv2.MORPH_OPEN, kernel_open)
+        
+        self.debug_images['enhanced_color'] = final_mask
+        
+        # Find contours and detect tube
+        contours, _ = cv2.findContours(final_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        return self._filter_tube_contours(contours, image.shape)
+    
+    def _remove_background_advanced(self, image: np.ndarray) -> np.ndarray:
+        """Advanced background removal that works with any background color"""
+        height, width = image.shape[:2]
+        
+        # Method 1: Edge-based background removal
         gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        mask_glass = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                          cv2.THRESH_BINARY, 11, 2)
-        masks.append(mask_glass)
+        edges = cv2.Canny(gray, 30, 100)
         
-        # Combine all masks
-        combined_mask = np.zeros_like(masks[0])
-        for mask in masks:
-            combined_mask = cv2.bitwise_or(combined_mask, mask)
+        # Method 2: Color clustering to identify background
+        # Sample border pixels to estimate background color
+        border_samples = []
         
-        # Morphological operations
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        # Top and bottom borders
+        border_samples.extend(image[0:5, :].reshape(-1, 3))
+        border_samples.extend(image[-5:, :].reshape(-1, 3))
+        
+        # Left and right borders  
+        border_samples.extend(image[:, 0:5].reshape(-1, 3))
+        border_samples.extend(image[:, -5:].reshape(-1, 3))
+        
+        border_samples = np.array(border_samples)
+        
+        # Estimate background color (median of border samples)
+        if len(border_samples) > 0:
+            bg_color = np.median(border_samples, axis=0)
+            
+            # Create mask for background color (with tolerance)
+            tolerance = 40
+            bg_mask = np.zeros((height, width), dtype=np.uint8)
+            
+            for i in range(3):  # RGB channels
+                channel_diff = np.abs(image[:,:,i].astype(float) - bg_color[i])
+                bg_mask = np.logical_or(bg_mask, channel_diff > tolerance)
+            
+            # Invert to get foreground mask
+            fg_mask = bg_mask.astype(np.uint8) * 255
+        else:
+            # Fallback: use edge detection only
+            fg_mask = edges
+        
+        # Method 3: Combine with adaptive thresholding
+        adaptive_mask = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 5)
+        
+        # Combine all methods
+        combined_mask = cv2.bitwise_or(fg_mask, edges)
+        combined_mask = cv2.bitwise_or(combined_mask, adaptive_mask)
+        
+        # Clean up mask
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_CLOSE, kernel)
         combined_mask = cv2.morphologyEx(combined_mask, cv2.MORPH_OPEN, kernel)
         
-        # Find contours
-        contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        self.debug_images['background_removal'] = combined_mask
         
-        self.debug_images['enhanced_color'] = combined_mask
-        
-        # Find tube-like contours and extend upward for full tube
-        tube_rect = self._filter_tube_contours(contours, image.shape)
-        if tube_rect:
-            # Extend upward assuming sealant is at bottom
-            x, y, w, h = tube_rect
-            extended_y = max(0, y - h * 8)  # Extend up 8x sealant height
-            extended_h = min(image.shape[0] - extended_y, y + h - extended_y + h * 2)
-            return (x, extended_y, w, extended_h)
-        
-        return None
+        return combined_mask
     
     def _detect_tube_by_template_matching(self, image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
         """Template matching approach for tube detection"""
@@ -662,26 +720,238 @@ class EnhancedPCVAnalyzer:
         return gradient
     
     def _detect_boundaries_enhanced(self, profiles: Dict, roi_height: int) -> Dict[str, BoundaryResult]:
-        """Enhanced boundary detection using multiple signals"""
+        """Advanced sequential color detection following medical hematocrit methodology"""
         boundaries = {}
         
-        # Boundary A: Top of Plasma (scan from top)
-        plasma_top = self._find_plasma_top_enhanced(profiles, roi_height)
-        boundaries['plasma_top'] = plasma_top
+        # Step 1: Detect plasticine bottom (blue/green) - starting point
+        plasticine_bottom = self._detect_plasticine_bottom(profiles, roi_height)
         
-        # Boundary C: Bottom of RBCs (scan from bottom) 
-        rbc_bottom = self._find_rbc_bottom_enhanced(profiles, roi_height)
+        # Step 2: Detect RBC bottom (transition from RBC red to plasticine)
+        rbc_bottom = self._detect_rbc_bottom_transition(profiles, roi_height, plasticine_bottom)
         boundaries['rbc_bottom'] = rbc_bottom
         
-        # Boundary B: Top of RBCs (scan in middle region)
-        if plasma_top.y_position != -1 and rbc_bottom.y_position != -1:
-            rbc_top = self._find_rbc_top_enhanced(profiles, plasma_top.y_position, rbc_bottom.y_position)
-        else:
-            rbc_top = BoundaryResult(-1, 0.0, "failed")
-        
+        # Step 3: Detect RBC top (transition from red to white/buffy coat)
+        rbc_top = self._detect_rbc_top_transition(profiles, roi_height, rbc_bottom)
         boundaries['rbc_top'] = rbc_top
         
+        # Step 4: Detect buffy coat boundaries (white to pale yellow)
+        buffy_boundaries = self._detect_buffy_coat_layer(profiles, roi_height, rbc_top)
+        boundaries['buffy_bottom'] = buffy_boundaries['bottom']
+        boundaries['buffy_top'] = buffy_boundaries['top']
+        
+        # Step 5: Detect plasma top (transition from plasma yellow to air/glass)
+        plasma_top = self._detect_plasma_top_transition(profiles, roi_height, buffy_boundaries['top'])
+        boundaries['plasma_top'] = plasma_top
+        
         return boundaries
+    
+    def _detect_plasticine_bottom(self, profiles: Dict, roi_height: int) -> BoundaryResult:
+        """Step 1: Detect plasticine bottom (blue/green clay)"""
+        # Search from bottom up to find the plasticine layer
+        search_start = roi_height - 5
+        search_end = max(int(roi_height * 0.7), search_start - 50)  # Don't go too far up
+        
+        candidates = []
+        
+        for y in range(search_start, search_end, -1):
+            # Multi-criteria plasticine detection
+            hue = profiles['hue'][y]
+            saturation = profiles['saturation'][y]
+            blue_value = profiles['blue'][y]
+            
+            # Blue plasticine characteristics (hue 100-140)
+            blue_score = 0
+            if 100 <= hue <= 140 and saturation > 80:
+                blue_score = saturation * 0.1 + (blue_value - 128) * 0.05
+            
+            # Green plasticine characteristics (hue 40-80)
+            green_score = 0
+            if 40 <= hue <= 80 and saturation > 70:
+                green_score = saturation * 0.08 + profiles['green'][y] * 0.03
+            
+            total_score = max(blue_score, green_score)
+            if total_score > 5:
+                candidates.append((y, total_score, 'plasticine_detection'))
+        
+        # Return the topmost (lowest y) plasticine detection
+        if candidates:
+            candidates.sort(key=lambda x: x[0])  # Sort by y position
+            best = candidates[0]
+            return BoundaryResult(best[0], min(1.0, best[1] / 20), best[2])
+        
+        # Fallback: use bottom portion as plasticine
+        fallback_y = roi_height - 10
+        return BoundaryResult(fallback_y, 0.3, 'fallback_bottom')
+    
+    def _detect_rbc_bottom_transition(self, profiles: Dict, roi_height: int, plasticine_bottom: BoundaryResult) -> BoundaryResult:
+        """Step 2: Detect transition from RBC (red) to plasticine"""
+        if plasticine_bottom.y_position == -1:
+            return BoundaryResult(-1, 0.0, "no_plasticine_reference")
+        
+        # Search upward from plasticine bottom
+        search_start = plasticine_bottom.y_position - 5
+        search_end = max(int(roi_height * 0.4), search_start - 100)
+        
+        candidates = []
+        
+        for y in range(search_start, search_end, -1):
+            # Look for red blood cell characteristics
+            red_value = profiles['red'][y]
+            hue = profiles['hue'][y]
+            saturation = profiles['saturation'][y]
+            
+            # RBC characteristics: high red, hue 0-20 or 160-180
+            rbc_score = 0
+            if (0 <= hue <= 20 or 160 <= hue <= 180) and red_value > 120:
+                rbc_score = red_value * 0.1 + saturation * 0.05
+            
+            # Also check for dark red (lower value but high red channel)
+            if red_value > 100 and profiles['value'][y] < 100:
+                rbc_score = max(rbc_score, red_value * 0.08)
+            
+            if rbc_score > 8:
+                candidates.append((y, rbc_score, 'rbc_detection'))
+        
+        # Find the bottommost RBC detection (highest y in search range)
+        if candidates:
+            candidates.sort(key=lambda x: x[0], reverse=True)
+            best = candidates[0]
+            return BoundaryResult(best[0], min(1.0, best[1] / 25), best[2])
+        
+        # Fallback
+        fallback_y = plasticine_bottom.y_position - 20
+        return BoundaryResult(max(0, fallback_y), 0.4, 'fallback_rbc_bottom')
+    
+    def _detect_rbc_top_transition(self, profiles: Dict, roi_height: int, rbc_bottom: BoundaryResult) -> BoundaryResult:
+        """Step 3: Detect transition from RBC (red) to buffy coat (white)"""
+        if rbc_bottom.y_position == -1:
+            return BoundaryResult(-1, 0.0, "no_rbc_bottom_reference")
+        
+        # Search upward from RBC bottom
+        search_start = rbc_bottom.y_position - 5
+        search_end = max(int(roi_height * 0.2), search_start - 150)
+        
+        candidates = []
+        
+        for y in range(search_start, search_end, -1):
+            # Look for transition from red to white/pale
+            red_drop = profiles['red'][y-5] - profiles['red'][y] if y >= 5 else 0
+            value_increase = profiles['value'][y] - profiles['value'][y+5] if y < len(profiles['value'])-5 else 0
+            saturation_drop = profiles['saturation'][y-5] - profiles['saturation'][y] if y >= 5 else 0
+            
+            # Score for RBC to buffy coat transition
+            transition_score = 0
+            if red_drop > 10:  # Red decreasing
+                transition_score += red_drop * 0.1
+            if value_increase > 10:  # Brightness increasing
+                transition_score += value_increase * 0.1
+            if saturation_drop > 10:  # Less saturated (more white)
+                transition_score += saturation_drop * 0.1
+            
+            if transition_score > 2:
+                candidates.append((y, transition_score, 'rbc_to_buffy_transition'))
+        
+        if candidates:
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            best = candidates[0]
+            return BoundaryResult(best[0], min(1.0, best[1] / 5), best[2])
+        
+        # Fallback
+        fallback_y = rbc_bottom.y_position - 50
+        return BoundaryResult(max(0, fallback_y), 0.3, 'fallback_rbc_top')
+    
+    def _detect_buffy_coat_layer(self, profiles: Dict, roi_height: int, rbc_top: BoundaryResult) -> Dict[str, BoundaryResult]:
+        """Step 4: Detect thin buffy coat layer (white to pale yellow)"""
+        if rbc_top.y_position == -1:
+            return {
+                'bottom': BoundaryResult(-1, 0.0, "no_rbc_top_reference"),
+                'top': BoundaryResult(-1, 0.0, "no_rbc_top_reference")
+            }
+        
+        # Buffy coat is typically very thin (2-5 pixels)
+        buffy_bottom = rbc_top.y_position  # Start of buffy coat is end of RBC
+        
+        # Search upward for buffy coat characteristics
+        search_start = rbc_top.y_position - 2
+        search_end = max(int(roi_height * 0.1), search_start - 20)
+        
+        buffy_candidates = []
+        
+        for y in range(search_start, search_end, -1):
+            # Buffy coat characteristics: whitish with slight yellow tint
+            value = profiles['value'][y]  # Brightness
+            saturation = profiles['saturation'][y]  # Should be low (white-ish)
+            hue = profiles['hue'][y]
+            b_channel = profiles['b_channel'][y]  # Yellow component in LAB
+            
+            # White/pale characteristics
+            buffy_score = 0
+            if value > 150 and saturation < 50:  # Bright but not saturated
+                buffy_score += (value - 150) * 0.1 + (50 - saturation) * 0.1
+            
+            # Slight yellow tint (hue 20-60 or positive b_channel)
+            if (20 <= hue <= 60 and saturation < 30) or b_channel > 130:
+                buffy_score += 2
+            
+            if buffy_score > 1:
+                buffy_candidates.append((y, buffy_score, 'buffy_coat'))
+        
+        # Find buffy coat top
+        if buffy_candidates:
+            buffy_candidates.sort(key=lambda x: x[0])  # Topmost
+            buffy_top_y = buffy_candidates[0][0]
+            buffy_top_confidence = min(1.0, buffy_candidates[0][1] / 5)
+        else:
+            # Very thin buffy coat fallback
+            buffy_top_y = max(0, rbc_top.y_position - 3)
+            buffy_top_confidence = 0.2
+        
+        return {
+            'bottom': BoundaryResult(buffy_bottom, rbc_top.confidence, 'buffy_bottom_from_rbc_top'),
+            'top': BoundaryResult(buffy_top_y, buffy_top_confidence, 'buffy_coat_detection')
+        }
+    
+    def _detect_plasma_top_transition(self, profiles: Dict, roi_height: int, buffy_top: BoundaryResult) -> BoundaryResult:
+        """Step 5: Detect transition from plasma (yellow) to air/glass (colorless)"""
+        if buffy_top.y_position == -1:
+            return BoundaryResult(-1, 0.0, "no_buffy_top_reference")
+        
+        # Search upward from buffy coat top
+        search_start = buffy_top.y_position - 2
+        search_end = max(0, search_start - 100)
+        
+        candidates = []
+        
+        for y in range(search_start, search_end, -1):
+            # Look for transition from plasma (yellowish) to air/glass (colorless)
+            value_drop = profiles['value'][y-5] - profiles['value'][y] if y >= 5 else 0
+            saturation_drop = profiles['saturation'][y-5] - profiles['saturation'][y] if y >= 5 else 0
+            b_channel_drop = profiles['b_channel'][y-5] - profiles['b_channel'][y] if y >= 5 else 0
+            
+            # Score for plasma to air transition
+            transition_score = 0
+            if value_drop > 15:  # Brightness drops (liquid to air)
+                transition_score += value_drop * 0.1
+            if saturation_drop > 5:  # Color disappears
+                transition_score += saturation_drop * 0.2
+            if b_channel_drop > 5:  # Yellow disappears
+                transition_score += b_channel_drop * 0.1
+            
+            # Also check for very low values (air/glass)
+            if profiles['value'][y] < 80 and profiles['saturation'][y] < 20:
+                transition_score += 2
+            
+            if transition_score > 1.5:
+                candidates.append((y, transition_score, 'plasma_to_air_transition'))
+        
+        if candidates:
+            candidates.sort(key=lambda x: x[1], reverse=True)
+            best = candidates[0]
+            return BoundaryResult(best[0], min(1.0, best[1] / 5), best[2])
+        
+        # Fallback
+        fallback_y = max(0, buffy_top.y_position - 30)
+        return BoundaryResult(fallback_y, 0.3, 'fallback_plasma_top')
     
     def _find_plasma_top_enhanced(self, profiles: Dict, roi_height: int) -> BoundaryResult:
         """Enhanced plasma top detection using multiple signals"""
@@ -832,92 +1102,129 @@ class EnhancedPCVAnalyzer:
         return BoundaryResult(-1, 0.0, "failed")
     
     def _validate_boundaries(self, boundaries: Dict[str, BoundaryResult]) -> bool:
-        """Enhanced boundary validation for vertical tube orientation"""
+        """Enhanced boundary validation for sequential layer detection"""
         plasma_top = boundaries.get('plasma_top', BoundaryResult(-1, 0, ""))
+        buffy_top = boundaries.get('buffy_top', BoundaryResult(-1, 0, ""))
+        buffy_bottom = boundaries.get('buffy_bottom', BoundaryResult(-1, 0, ""))  # Same as RBC top
         rbc_top = boundaries.get('rbc_top', BoundaryResult(-1, 0, ""))
         rbc_bottom = boundaries.get('rbc_bottom', BoundaryResult(-1, 0, ""))
         
-        # Check if all boundaries were detected
+        # Check if critical boundaries were detected
         if plasma_top.y_position == -1 or rbc_top.y_position == -1 or rbc_bottom.y_position == -1:
             return False
         
-        # Vertical orientation validation: A (plasma top) < B (RBC top) < C (RBC bottom)
+        # Sequential validation: plasma_top < buffy_top < rbc_top < rbc_bottom
+        # Note: buffy layers might be very thin or undetected, so be flexible
         if not (plasma_top.y_position < rbc_top.y_position < rbc_bottom.y_position):
             return False
         
         # Enhanced validation checks for medical accuracy
-        # 1. Minimum distances between boundaries (avoid too close boundaries)
-        min_plasma_rbc_distance = 10  # At least 1mm between plasma and RBC
-        min_rbc_height = 20  # RBC layer should be at least 2mm thick
+        # 1. Minimum distances between boundaries
+        min_plasma_rbc_distance = 5   # Reduced for buffy coat consideration
+        min_rbc_height = 15  # Minimum RBC layer thickness
         
-        plasma_to_rbc_distance = rbc_top.y_position - plasma_top.y_position
+        # Calculate layer sizes
+        plasma_height = rbc_top.y_position - plasma_top.y_position
         rbc_height = rbc_bottom.y_position - rbc_top.y_position
+        total_height = rbc_bottom.y_position - plasma_top.y_position
         
-        if plasma_to_rbc_distance < min_plasma_rbc_distance:
+        if plasma_height < min_plasma_rbc_distance:
             return False
         
         if rbc_height < min_rbc_height:
             return False
         
-        # 2. Total height should be reasonable (not too small or too large)
-        total_height = rbc_bottom.y_position - plasma_top.y_position
-        if total_height < 50 or total_height > 500:  # 5mm to 50mm range
+        # 2. Total height should be reasonable
+        if total_height < 40 or total_height > 600:  # 4mm to 60mm range
             return False
         
         # 3. PCV should be in medically reasonable range
         pcv = (rbc_height / total_height) * 100
-        if pcv < 10 or pcv > 70:  # Medical PCV range
+        if pcv < 8 or pcv > 75:  # Slightly expanded medical PCV range
             return False
         
-        # 4. Confidence scores should be reasonable
-        avg_confidence = (plasma_top.confidence + rbc_top.confidence + rbc_bottom.confidence) / 3
-        if avg_confidence < 0.3:  # At least 30% confidence
+        # 4. Confidence scores should be reasonable for critical boundaries
+        critical_confidence = (plasma_top.confidence + rbc_top.confidence + rbc_bottom.confidence) / 3
+        if critical_confidence < 0.25:  # Reduced threshold
             return False
         
         return True
     
     def _calculate_pcv_enhanced(self, boundaries: Dict[str, BoundaryResult], warnings: List[str]) -> Dict:
-        """Calculate PCV with enhanced precision and validation"""
-        plasma_top = boundaries['plasma_top']
-        rbc_top = boundaries['rbc_top']
-        rbc_bottom = boundaries['rbc_bottom']
+        """Comprehensive measurement system with all layer sizes"""
+        plasma_top = boundaries.get('plasma_top', BoundaryResult(-1, 0, ""))
+        buffy_top = boundaries.get('buffy_top', BoundaryResult(-1, 0, ""))
+        buffy_bottom = boundaries.get('buffy_bottom', BoundaryResult(-1, 0, ""))
+        rbc_top = boundaries.get('rbc_top', BoundaryResult(-1, 0, ""))
+        rbc_bottom = boundaries.get('rbc_bottom', BoundaryResult(-1, 0, ""))
         
+        # Check critical boundaries
         if plasma_top.y_position == -1 or rbc_top.y_position == -1 or rbc_bottom.y_position == -1:
             return {
-                'pcv': 0.0, 'hemoglobin': 0.0, 'total_height': 0, 'packed_height': 0, 'confidence': 0.0
+                'pcv': 0.0, 'hemoglobin': 0.0, 'total_height': 0, 'packed_height': 0, 
+                'rbc_size': 0, 'buffy_size': 0, 'plasma_size': 0, 'total_size': 0, 'confidence': 0.0
             }
         
-        # Calculate heights
-        total_height = rbc_bottom.y_position - plasma_top.y_position
-        packed_height = rbc_bottom.y_position - rbc_top.y_position
+        # Calculate comprehensive layer measurements
+        # Total size: from plasma top to RBC bottom (as specified)
+        total_size = rbc_bottom.y_position - plasma_top.y_position
         
-        if total_height <= 0:
+        # RBC size: height of red blood cell layer
+        rbc_size = rbc_bottom.y_position - rbc_top.y_position
+        
+        # Plasma size: from plasma top to buffy coat bottom (or RBC top)
+        if buffy_bottom.y_position != -1:
+            plasma_size = buffy_bottom.y_position - plasma_top.y_position
+        else:
+            plasma_size = rbc_top.y_position - plasma_top.y_position
+        
+        # Buffy coat size: very thin layer between RBC and plasma
+        if buffy_top.y_position != -1 and buffy_bottom.y_position != -1:
+            buffy_size = buffy_bottom.y_position - buffy_top.y_position
+        else:
+            # Estimate minimal buffy coat if not detected
+            buffy_size = 2  # Minimal buffy coat assumption
+        
+        # Validation
+        if total_size <= 0:
             warnings.append("Invalid total height measurement")
             return {
-                'pcv': 0.0, 'hemoglobin': 0.0, 'total_height': 0, 'packed_height': 0, 'confidence': 0.0
+                'pcv': 0.0, 'hemoglobin': 0.0, 'total_height': 0, 'packed_height': 0,
+                'rbc_size': 0, 'buffy_size': 0, 'plasma_size': 0, 'total_size': 0, 'confidence': 0.0
             }
         
-        # Calculate PCV with high precision
-        pcv = (packed_height / total_height) * 100.0
+        # Calculate PCV: RBC size divided by Total size × 100
+        pcv = (rbc_size / total_size) * 100.0
         
         # Calculate hemoglobin using PCV/3 rule
         hemoglobin = pcv / 3.0
         
-        # Calculate overall confidence
-        confidence = (plasma_top.confidence + rbc_top.confidence + rbc_bottom.confidence) / 3.0
+        # Calculate overall confidence (prioritize critical boundaries)
+        confidence = (plasma_top.confidence * 0.3 + rbc_top.confidence * 0.4 + rbc_bottom.confidence * 0.3)
         
         # Validate PCV range
-        if pcv < 10 or pcv > 70:
-            warnings.append(f"PCV value ({pcv:.1f}%) outside expected range (10-70%)")
+        if pcv < 8 or pcv > 75:
+            warnings.append(f"PCV value ({pcv:.1f}%) outside expected range (8-75%)")
         
-        if hemoglobin < 3 or hemoglobin > 25:
-            warnings.append(f"Estimated Hb ({hemoglobin:.1f} g/dL) outside expected range (3-25 g/dL)")
+        if hemoglobin < 2.5 or hemoglobin > 25:
+            warnings.append(f"Estimated Hb ({hemoglobin:.1f} g/dL) outside expected range (2.5-25 g/dL)")
+        
+        # Check layer proportions
+        if plasma_size / total_size < 0.2:  # Plasma should be at least 20%
+            warnings.append("Plasma layer appears unusually small")
+        
+        if rbc_size / total_size > 0.8:  # RBC shouldn't exceed 80%
+            warnings.append("RBC layer appears unusually large")
         
         return {
             'pcv': round(pcv, 1),
             'hemoglobin': round(hemoglobin, 1), 
-            'total_height': total_height,
-            'packed_height': packed_height,
+            'total_height': total_size,  # For backward compatibility
+            'packed_height': rbc_size,  # For backward compatibility
+            'rbc_size': rbc_size,
+            'buffy_size': buffy_size,
+            'plasma_size': plasma_size,
+            'total_size': total_size,
             'confidence': confidence
         }
     
