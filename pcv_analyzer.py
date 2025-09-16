@@ -90,8 +90,41 @@ class EnhancedPCVAnalyzer:
             # Ensure vertical orientation with blue plasticine at bottom
             oriented_image, oriented_rect = self._ensure_vertical_orientation_advanced(image_rgb, tube_rect)
             
-            tube_roi = oriented_image[oriented_rect[1]:oriented_rect[1]+oriented_rect[3], 
-                                    oriented_rect[0]:oriented_rect[0]+oriented_rect[2]]
+            # Validate oriented rectangle bounds
+            x, y, w, h = oriented_rect
+            img_h, img_w = oriented_image.shape[:2]
+            
+            if x < 0 or y < 0 or x + w > img_w or y + h > img_h or w <= 0 or h <= 0:
+                return AnalysisResult(
+                    pcv=0, hemoglobin=0, total_height=0, packed_height=0,
+                    boundaries={}, tube_rect=(0,0,0,0), detection_method="invalid_roi",
+                    confidence_overall=0, processing_time_ms=int((time.time() - start_time) * 1000),
+                    warnings=warnings, success=False, 
+                    error_message=f"Invalid tube ROI bounds: {oriented_rect} for image size {img_w}x{img_h}"
+                )
+            
+            # Extract tube ROI safely
+            tube_roi = oriented_image[y:y+h, x:x+w]
+            
+            # Validate tube ROI
+            if tube_roi.size == 0:
+                return AnalysisResult(
+                    pcv=0, hemoglobin=0, total_height=0, packed_height=0,
+                    boundaries={}, tube_rect=(0,0,0,0), detection_method="empty_roi",
+                    confidence_overall=0, processing_time_ms=int((time.time() - start_time) * 1000),
+                    warnings=warnings, success=False, 
+                    error_message="Empty tube ROI extracted"
+                )
+            
+            if len(tube_roi.shape) != 3 or tube_roi.shape[2] != 3:
+                return AnalysisResult(
+                    pcv=0, hemoglobin=0, total_height=0, packed_height=0,
+                    boundaries={}, tube_rect=(0,0,0,0), detection_method="invalid_roi_shape",
+                    confidence_overall=0, processing_time_ms=int((time.time() - start_time) * 1000),
+                    warnings=warnings, success=False, 
+                    error_message=f"Invalid tube ROI shape: {tube_roi.shape}. Expected (H,W,3)"
+                )
+            
             self.debug_images['tube_roi'] = tube_roi
             self.debug_images['oriented_image'] = oriented_image
             
@@ -642,12 +675,25 @@ class EnhancedPCVAnalyzer:
     
     def _create_enhanced_profiles(self, tube_roi: np.ndarray) -> Dict:
         """Create enhanced intensity profiles with multiple channels"""
-        height = tube_roi.shape[0]
+        # Validate input
+        if tube_roi is None or tube_roi.size == 0:
+            raise ValueError("Empty tube ROI provided to profile creation")
         
-        # Convert to multiple color spaces for analysis
-        hsv = cv2.cvtColor(tube_roi, cv2.COLOR_RGB2HSV)
-        lab = cv2.cvtColor(tube_roi, cv2.COLOR_RGB2LAB)
-        gray = cv2.cvtColor(tube_roi, cv2.COLOR_RGB2GRAY)
+        if len(tube_roi.shape) != 3 or tube_roi.shape[2] != 3:
+            raise ValueError(f"Invalid tube ROI shape: {tube_roi.shape}. Expected (H, W, 3)")
+        
+        height, width = tube_roi.shape[:2]
+        
+        if height < 10 or width < 5:
+            raise ValueError(f"Tube ROI too small: {width}x{height}. Minimum size: 5x10")
+        
+        try:
+            # Convert to multiple color spaces for analysis
+            hsv = cv2.cvtColor(tube_roi, cv2.COLOR_RGB2HSV)
+            lab = cv2.cvtColor(tube_roi, cv2.COLOR_RGB2LAB)
+            gray = cv2.cvtColor(tube_roi, cv2.COLOR_RGB2GRAY)
+        except Exception as e:
+            raise ValueError(f"Color space conversion failed: {e}")
         
         profiles = {
             'hue': [],
