@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enhanced PCV Analyzer - Python Version</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .drag-handle {
+            cursor: grab;
+            transition: all 0.2s ease;
+        }
+        .drag-handle:hover {
+            transform: scale(1.1);
+            cursor: grabbing;
+        }
+        .boundary-line {
+            stroke-width: 3;
+            opacity: 0.9;
+        }
+        .loading {
+            animation: pulse 2s ease-in-out infinite alternate;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            100% { opacity: 1; }
+        }
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .glass-morphism {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen">
+    <!-- Header -->
+    <header class="glass-morphism shadow-lg sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto py-4 px-6 flex items-center justify-between">
+            <div class="flex items-center space-x-4">
+                <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center">
+                    <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-white">Enhanced PCV Analyzer</h1>
+                    <p class="text-xs text-gray-200">Python Version - Professional Medical Analysis</p>
+                </div>
+            </div>
+            <div class="flex items-center space-x-2">
+                <span class="px-3 py-1 bg-green-500 text-white rounded-full text-xs font-medium">
+                    🐍 Python Powered
+                </span>
+                <span class="px-3 py-1 bg-blue-500 text-white rounded-full text-xs font-medium">
+                    v2.0
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <div class="max-w-7xl mx-auto p-6 space-y-8">
+        
+        <!-- Upload Section -->
+        <div class="bg-white rounded-xl shadow-xl p-8">
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold text-gray-800 mb-2">Professional PCV Analysis</h2>
+                <p class="text-gray-600 max-w-2xl mx-auto">
+                    Upload a high-quality image of a centrifuged capillary tube for automated Packed Cell Volume analysis 
+                    with professional-grade accuracy and manual correction capabilities.
+                </p>
+            </div>
+
+            <!-- Upload Area -->
+            <div id="uploadArea" class="border-2 border-dashed border-blue-300 rounded-xl p-12 text-center hover:border-blue-500 transition-colors cursor-pointer">
+                <div id="uploadContent">
+                    <svg class="w-16 h-16 text-blue-400 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                    </svg>
+                    <p class="text-xl font-semibold text-gray-700 mb-2">Upload PCV Tube Image</p>
+                    <p class="text-gray-500 mb-4">Drop your image here or click to browse</p>
+                    <p class="text-sm text-gray-400">Supports: PNG, JPG, JPEG, GIF, BMP, TIFF (Max: 16MB)</p>
+                </div>
+                <div id="uploadLoading" class="hidden">
+                    <div class="loading">
+                        <svg class="w-16 h-16 text-blue-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                        </svg>
+                    </div>
+                    <p class="text-xl font-semibold text-blue-600 mb-2">Analyzing Image...</p>
+                    <p class="text-gray-500">Please wait while we process your image with enhanced algorithms</p>
+                </div>
+            </div>
+            
+            <input type="file" id="fileInput" class="hidden" accept="image/*">
+        </div>
+
+        <!-- Results Section -->
+        <div id="resultsSection" class="hidden">
+            
+            <!-- Analysis Status -->
+            <div id="analysisStatus" class="bg-white rounded-xl shadow-xl p-6 mb-6">
+                <h3 class="text-xl font-semibold text-gray-800 mb-4">Analysis Results</h3>
+                <div id="statusContent"></div>
+            </div>
+
+            <!-- Mode Toggle -->
+            <div class="text-center mb-6">
+                <div class="inline-flex bg-gray-100 rounded-xl p-1">
+                    <button id="automaticMode" class="px-6 py-3 rounded-lg font-semibold transition-all duration-300 bg-blue-500 text-white shadow-lg">
+                        🤖 Automatic Analysis
+                    </button>
+                    <button id="manualMode" class="px-6 py-3 rounded-lg font-semibold transition-all duration-300 text-gray-600 hover:text-gray-800">
+                        ✏️ Manual Correction
+                    </button>
+                </div>
+            </div>
+
+            <!-- Automatic Results -->
+            <div id="automaticResults" class="bg-white rounded-xl shadow-xl p-8">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Image Display -->
+                    <div class="space-y-4">
+                        <h4 class="text-lg font-semibold text-gray-800">Analyzed Image</h4>
+                        <div class="border border-gray-200 rounded-lg overflow-hidden">
+                            <img id="annotatedImage" class="w-full h-auto" alt="Analyzed tube">
+                        </div>
+                        <!-- Debug Images Toggle -->
+                        <div class="text-center">
+                            <button id="showDebugImages" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors text-sm">
+                                🔍 Show Debug Images
+                            </button>
+                        </div>
+                        <!-- Debug Images Container -->
+                        <div id="debugImagesContainer" class="hidden space-y-4">
+                            <h5 class="font-semibold text-gray-700">Processing Steps:</h5>
+                            <div id="debugImages" class="grid grid-cols-2 gap-4"></div>
+                        </div>
+                    </div>
+
+                    <!-- Results Panel -->
+                    <div class="space-y-6">
+                        <!-- PCV Result -->
+                        <div class="text-center bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-xl border border-blue-100">
+                            <p class="text-sm font-medium text-gray-500 tracking-wider mb-2">PACKED CELL VOLUME (PCV)</p>
+                            <p id="pcvValue" class="text-5xl font-bold text-blue-600 mb-3">--%</p>
+                            <div id="confidenceIndicator" class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium">
+                                <div class="w-2 h-2 rounded-full mr-2"></div>
+                                <span id="confidenceText">Processing...</span>
+                            </div>
+                        </div>
+
+                        <!-- Hemoglobin -->
+                        <div class="text-center bg-gradient-to-br from-green-50 to-emerald-50 p-4 rounded-lg border border-green-100">
+                            <p class="text-sm font-medium text-gray-500 tracking-wider mb-1">ESTIMATED HEMOGLOBIN (Hb)</p>
+                            <p id="hbValue" class="text-3xl font-semibold text-green-600 mb-1">-- g/dL</p>
+                            <p class="text-xs text-gray-400">(Using PCV/3 formula)</p>
+                        </div>
+
+                        <!-- Detection Details -->
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <h5 class="font-semibold text-gray-700 mb-3">Detection Details</h5>
+                            <div id="detectionDetails" class="space-y-2 text-sm">
+                                <!-- Details will be populated by JavaScript -->
+                            </div>
+                        </div>
+
+                        <!-- Clinical Interpretation -->
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <h5 class="font-semibold text-blue-800 mb-2">🩺 Clinical Interpretation</h5>
+                            <div id="clinicalInterpretation" class="text-sm text-blue-700">
+                                <p id="pcvInterpretation">Awaiting analysis...</p>
+                                <p id="hbInterpretation">Awaiting analysis...</p>
+                                <p class="text-xs text-blue-600 mt-2">
+                                    <strong>Note:</strong> This analysis is for educational and research purposes. 
+                                    Clinical decisions should be based on complete laboratory evaluation.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manual Correction Interface -->
+            <div id="manualResults" class="hidden bg-white rounded-xl shadow-xl p-8">
+                <div class="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h3 class="text-blue-800 font-semibold mb-2">🎯 Manual Correction Mode</h3>
+                    <div class="text-blue-700 text-sm space-y-1">
+                        <p>• Click and drag the colored handles to adjust boundary positions</p>
+                        <p>• <span class="inline-block w-3 h-3 bg-yellow-400 rounded-full"></span> Yellow: Top of plasma (start of sample)</p>
+                        <p>• <span class="inline-block w-3 h-3 bg-green-500 rounded-full"></span> Green: Top of RBCs (plasma/RBC interface)</p>
+                        <p>• <span class="inline-block w-3 h-3 bg-red-500 rounded-full"></span> Red: Bottom of RBCs (end of sample)</p>
+                        <p>• PCV updates automatically as you adjust boundaries</p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- Interactive Canvas -->
+                    <div class="space-y-4">
+                        <h4 class="text-lg font-semibold text-gray-800">Interactive Correction</h4>
+                        <div class="border border-gray-300 rounded-lg overflow-hidden relative">
+                            <canvas id="manualCanvas" class="w-full h-auto cursor-crosshair"></canvas>
+                        </div>
+                        <div class="text-center">
+                            <button id="resetBoundaries" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition-colors text-sm">
+                                🔄 Reset to Automatic
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Live Results -->
+                    <div class="space-y-6">
+                        <!-- Manual PCV Result -->
+                        <div class="text-center bg-gradient-to-br from-green-50 to-emerald-50 p-6 rounded-xl border border-green-100">
+                            <p class="text-sm font-medium text-gray-500 tracking-wider mb-2">CORRECTED PCV</p>
+                            <p id="manualPcvValue" class="text-5xl font-bold text-green-600 mb-3">--%</p>
+                            <div class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-200">
+                                <div class="w-2 h-2 rounded-full bg-green-500 mr-2"></div>
+                                Manually Adjusted
+                            </div>
+                        </div>
+
+                        <!-- Manual Hemoglobin -->
+                        <div class="text-center bg-gradient-to-br from-slate-50 to-gray-50 p-4 rounded-lg border border-slate-200">
+                            <p class="text-sm font-medium text-gray-500 tracking-wider mb-1">ESTIMATED HEMOGLOBIN (Hb)</p>
+                            <p id="manualHbValue" class="text-3xl font-semibold text-slate-700 mb-1">-- g/dL</p>
+                            <p class="text-xs text-slate-400">(Using PCV/3 formula)</p>
+                        </div>
+
+                        <!-- Boundary Details -->
+                        <div class="bg-gray-50 rounded-lg p-4">
+                            <h5 class="font-semibold text-gray-700 mb-3">📏 Current Measurements</h5>
+                            <div id="boundaryMeasurements" class="space-y-2 text-sm">
+                                <!-- Measurements will be populated by JavaScript -->
+                            </div>
+                        </div>
+
+                        <!-- Manual Clinical Interpretation -->
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <h5 class="font-semibold text-blue-800 mb-2">🩺 Clinical Interpretation</h5>
+                            <div id="manualClinicalInterpretation" class="text-sm text-blue-700">
+                                <p id="manualPcvInterpretation">Adjust boundaries to see interpretation</p>
+                                <p id="manualHbInterpretation"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Warnings Section -->
+            <div id="warningsSection" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-6">
+                <div class="flex items-start space-x-3">
+                    <svg class="w-6 h-6 text-amber-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 15.5c-.77.833.192 2.5 1.732 2.5z"/>
+                    </svg>
+                    <div>
+                        <h4 class="font-semibold text-amber-800 mb-2">Analysis Warnings</h4>
+                        <ul id="warningsList" class="space-y-1 text-sm text-amber-700">
+                            <!-- Warnings will be populated by JavaScript -->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <footer class="text-center py-6 text-white text-sm">
+            <p>Enhanced PCV Analyzer - Python Version | Professional Medical Image Analysis</p>
+            <p class="text-xs text-gray-300 mt-1">&copy; 2025 Dr. Mufti & Team | For Educational and Research Purposes</p>
+        </footer>
+    </div>
+
+    <script>
+        let analysisResult = null;
+        let manualCanvas = null;
+        let manualCtx = null;
+        let boundaries = {
+            plasma_top_y: 50,
+            rbc_top_y: 120,
+            rbc_bottom_y: 180
+        };
+        let isDragging = null;
+        let canvasImage = null;
+
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeUpload();
+            initializeModeToggle();
+            initializeManualCanvas();
+        });
+
+        function initializeUpload() {
+            const uploadArea = document.getElementById('uploadArea');
+            const fileInput = document.getElementById('fileInput');
+
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', handleDragOver);
+            uploadArea.addEventListener('drop', handleDrop);
+            fileInput.addEventListener('change', handleFileSelect);
+        }
+
+        function initializeModeToggle() {
+            const automaticMode = document.getElementById('automaticMode');
+            const manualMode = document.getElementById('manualMode');
+            
+            automaticMode.addEventListener('click', () => switchMode('automatic'));
+            manualMode.addEventListener('click', () => switchMode('manual'));
+        }
+
+        function initializeManualCanvas() {
+            manualCanvas = document.getElementById('manualCanvas');
+            manualCtx = manualCanvas.getContext('2d');
+            
+            manualCanvas.addEventListener('mousedown', handleCanvasMouseDown);
+            manualCanvas.addEventListener('mousemove', handleCanvasMouseMove);
+            manualCanvas.addEventListener('mouseup', handleCanvasMouseUp);
+            manualCanvas.addEventListener('mouseleave', handleCanvasMouseUp);
+
+            document.getElementById('resetBoundaries').addEventListener('click', resetBoundaries);
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'copy';
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                processFile(files[0]);
+            }
+        }
+
+        function handleFileSelect(e) {
+            const files = e.target.files;
+            if (files.length > 0) {
+                processFile(files[0]);
+            }
+        }
+
+        function processFile(file) {
+            // Validate file type
+            const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/bmp'];
+            if (!validTypes.includes(file.type)) {
+                alert('Please upload a valid image file (PNG, JPG, JPEG, GIF, BMP)');
+                return;
+            }
+
+            // Validate file size (16MB max)
+            if (file.size > 16 * 1024 * 1024) {
+                alert('File too large. Maximum size is 16MB.');
+                return;
+            }
+
+            // Show loading state
+            document.getElementById('uploadContent').classList.add('hidden');
+            document.getElementById('uploadLoading').classList.remove('hidden');
+
+            // Upload and analyze
+            const formData = new FormData();
+            formData.append('file', file);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    throw new Error(data.error);
+                }
+                displayResults(data);
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Analysis failed: ' + error.message);
+                resetUploadArea();
+            });
+        }
+
+        function resetUploadArea() {
+            document.getElementById('uploadContent').classList.remove('hidden');
+            document.getElementById('uploadLoading').classList.add('hidden');
+        }
+
+        function displayResults(data) {
+            analysisResult = data;
+            
+            // Hide upload area, show results
+            resetUploadArea();
+            document.getElementById('resultsSection').classList.remove('hidden');
+            
+            // Update status
+            updateAnalysisStatus(data);
+            
+            // Display automatic results
+            displayAutomaticResults(data);
+            
+            // Setup manual correction
+            setupManualCorrection(data);
+            
+            // Show warnings if any
+            if (data.warnings && data.warnings.length > 0) {
+                displayWarnings(data.warnings);
+            }
+            
+            // Scroll to results
+            document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function updateAnalysisStatus(data) {
+            const statusContent = document.getElementById('statusContent');
+            
+            if (data.success) {
+                statusContent.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
+                            <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-green-800">Analysis Completed Successfully</p>
+                            <p class="text-sm text-green-600">Processed in ${data.processing_time_ms}ms using ${data.detection_method} method</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                statusContent.innerHTML = `
+                    <div class="flex items-center space-x-3">
+                        <div class="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center">
+                            <svg class="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                            </svg>
+                        </div>
+                        <div>
+                            <p class="font-semibold text-red-800">Analysis Failed</p>
+                            <p class="text-sm text-red-600">${data.error_message || 'Unknown error occurred'}</p>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        function displayAutomaticResults(data) {
+            // Update PCV value
+            document.getElementById('pcvValue').textContent = `${data.pcv}%`;
+            
+            // Update hemoglobin value
+            document.getElementById('hbValue').textContent = `${data.hemoglobin} g/dL`;
+            
+            // Update confidence indicator
+            updateConfidenceIndicator(data.confidence_overall);
+            
+            // Update detection details
+            updateDetectionDetails(data);
+            
+            // Update clinical interpretation
+            updateClinicalInterpretation(data.pcv, data.hemoglobin);
+            
+            // Display annotated image
+            if (data.debug_images && data.debug_images.annotated) {
+                document.getElementById('annotatedImage').src = data.debug_images.annotated;
+            }
+            
+            // Setup debug images
+            setupDebugImages(data.debug_images);
+        }
+
+        function updateConfidenceIndicator(confidence) {
+            const indicator = document.getElementById('confidenceIndicator');
+            const text = document.getElementById('confidenceText');
+            const dot = indicator.querySelector('div');
+            
+            const percentage = Math.round(confidence * 100);
+            text.textContent = `${getConfidenceLabel(confidence)} Confidence (${percentage}%)`;
+            
+            if (confidence >= 0.8) {
+                indicator.className = 'inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 border border-green-200';
+                dot.className = 'w-2 h-2 rounded-full mr-2 bg-green-500';
+            } else if (confidence >= 0.6) {
+                indicator.className = 'inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 border border-yellow-200';
+                dot.className = 'w-2 h-2 rounded-full mr-2 bg-yellow-500';
+            } else {
+                indicator.className = 'inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 border border-red-200';
+                dot.className = 'w-2 h-2 rounded-full mr-2 bg-red-500';
+            }
+        }
+
+        function getConfidenceLabel(confidence) {
+            if (confidence >= 0.8) return 'High';
+            if (confidence >= 0.6) return 'Medium';
+            return 'Low';
+        }
+
+        function updateDetectionDetails(data) {
+            const details = document.getElementById('detectionDetails');
+            let html = '';
+            
+            html += `
+                <div class="flex justify-between">
+                    <span>Detection Method:</span>
+                    <span class="font-mono text-blue-600">${data.detection_method}</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>Processing Time:</span>
+                    <span class="font-mono text-blue-600">${data.processing_time_ms}ms</span>
+                </div>
+                <div class="flex justify-between">
+                    <span>Overall Confidence:</span>
+                    <span class="font-mono text-blue-600">${Math.round(data.confidence_overall * 100)}%</span>
+                </div>
+            `;
+            
+            if (data.tube_rect) {
+                html += `
+                    <div class="flex justify-between">
+                        <span>Tube Location:</span>
+                        <span class="font-mono text-blue-600">x=${data.tube_rect[0]}, y=${data.tube_rect[1]}</span>
+                    </div>
+                `;
+            }
+            
+            details.innerHTML = html;
+        }
+
+        function updateClinicalInterpretation(pcv, hemoglobin) {
+            const pcvInterp = document.getElementById('pcvInterpretation');
+            const hbInterp = document.getElementById('hbInterpretation');
+            
+            pcvInterp.innerHTML = `<strong>PCV:</strong> ${pcv}% - ${getPcvInterpretation(pcv)}`;
+            hbInterp.innerHTML = `<strong>Hb:</strong> ${hemoglobin} g/dL - ${getHbInterpretation(hemoglobin)}`;
+        }
+
+        function getPcvInterpretation(pcv) {
+            if (pcv < 30) return "Below normal range (possible anemia)";
+            if (pcv > 52) return "Above normal range (possible polycythemia)";
+            return "Within normal range";
+        }
+
+        function getHbInterpretation(hb) {
+            if (hb < 10) return "Below normal range (possible anemia)";
+            if (hb > 17) return "Above normal range (possible polycythemia)";
+            return "Within normal range";
+        }
+
+        function setupDebugImages(debugImages) {
+            const showButton = document.getElementById('showDebugImages');
+            const container = document.getElementById('debugImagesContainer');
+            const imagesGrid = document.getElementById('debugImages');
+            
+            showButton.addEventListener('click', function() {
+                container.classList.toggle('hidden');
+                this.textContent = container.classList.contains('hidden') ? 
+                    '🔍 Show Debug Images' : '🙈 Hide Debug Images';
+            });
+            
+            // Populate debug images
+            let html = '';
+            const imageOrder = ['original', 'preprocessed', 'advanced_edges', 'enhanced_color', 'tube_roi', 'annotated'];
+            
+            for (const name of imageOrder) {
+                if (debugImages[name]) {
+                    const title = name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    html += `
+                        <div class="text-center">
+                            <img src="${debugImages[name]}" alt="${title}" class="w-full h-auto rounded border border-gray-200">
+                            <p class="text-xs text-gray-600 mt-1">${title}</p>
+                        </div>
+                    `;
+                }
+            }
+            
+            imagesGrid.innerHTML = html;
+        }
+
+        function setupManualCorrection(data) {
+            if (data.debug_images && data.debug_images.tube_roi) {
+                const img = new Image();
+                img.onload = function() {
+                    canvasImage = img;
+                    manualCanvas.width = img.width;
+                    manualCanvas.height = img.height;
+                    
+                    // Initialize boundaries based on automatic detection
+                    if (data.boundaries) {
+                        boundaries.plasma_top_y = data.boundaries.plasma_top?.y_position || 50;
+                        boundaries.rbc_top_y = data.boundaries.rbc_top?.y_position || 120;
+                        boundaries.rbc_bottom_y = data.boundaries.rbc_bottom?.y_position || 180;
+                    }
+                    
+                    drawManualCanvas();
+                    updateManualResults();
+                };
+                img.src = data.debug_images.tube_roi;
+            }
+        }
+
+        function switchMode(mode) {
+            const automaticButton = document.getElementById('automaticMode');
+            const manualButton = document.getElementById('manualMode');
+            const automaticResults = document.getElementById('automaticResults');
+            const manualResults = document.getElementById('manualResults');
+            
+            if (mode === 'automatic') {
+                automaticButton.className = 'px-6 py-3 rounded-lg font-semibold transition-all duration-300 bg-blue-500 text-white shadow-lg';
+                manualButton.className = 'px-6 py-3 rounded-lg font-semibold transition-all duration-300 text-gray-600 hover:text-gray-800';
+                automaticResults.classList.remove('hidden');
+                manualResults.classList.add('hidden');
+            } else {
+                manualButton.className = 'px-6 py-3 rounded-lg font-semibold transition-all duration-300 bg-orange-500 text-white shadow-lg';
+                automaticButton.className = 'px-6 py-3 rounded-lg font-semibold transition-all duration-300 text-gray-600 hover:text-gray-800';
+                automaticResults.classList.add('hidden');
+                manualResults.classList.remove('hidden');
+            }
+        }
+
+        function drawManualCanvas() {
+            if (!canvasImage) return;
+            
+            // Clear canvas
+            manualCtx.clearRect(0, 0, manualCanvas.width, manualCanvas.height);
+            
+            // Draw image with slight transparency to make lines more visible
+            manualCtx.globalAlpha = 0.85;
+            manualCtx.drawImage(canvasImage, 0, 0);
+            manualCtx.globalAlpha = 1.0;
+            
+            // Draw boundary lines and handles
+            const colors = {
+                plasma_top_y: '#FFD700',
+                rbc_top_y: '#00FF00',
+                rbc_bottom_y: '#FF0000'
+            };
+            
+            const labels = {
+                plasma_top_y: 'Plasma Top',
+                rbc_top_y: 'RBC Top',
+                rbc_bottom_y: 'RBC Bottom'
+            };
+            
+            for (const [boundary, y] of Object.entries(boundaries)) {
+                const color = colors[boundary];
+                
+                // Draw full-width line with shadow for visibility
+                manualCtx.shadowColor = 'rgba(0,0,0,0.5)';
+                manualCtx.shadowBlur = 3;
+                manualCtx.shadowOffsetY = 2;
+                
+                manualCtx.strokeStyle = color;
+                manualCtx.lineWidth = 4;
+                manualCtx.beginPath();
+                manualCtx.moveTo(0, y);
+                manualCtx.lineTo(manualCanvas.width, y);
+                manualCtx.stroke();
+                
+                // Reset shadow
+                manualCtx.shadowColor = 'transparent';
+                manualCtx.shadowBlur = 0;
+                manualCtx.shadowOffsetY = 0;
+                
+                // Draw handle (larger for better interaction)
+                manualCtx.fillStyle = color;
+                manualCtx.beginPath();
+                manualCtx.arc(manualCanvas.width - 30, y, 12, 0, 2 * Math.PI);
+                manualCtx.fill();
+                
+                // Handle border
+                manualCtx.strokeStyle = '#FFFFFF';
+                manualCtx.lineWidth = 3;
+                manualCtx.stroke();
+                
+                // Inner handle dot
+                manualCtx.fillStyle = '#333333';
+                manualCtx.beginPath();
+                manualCtx.arc(manualCanvas.width - 30, y, 4, 0, 2 * Math.PI);
+                manualCtx.fill();
+                
+                // Draw label with better contrast
+                manualCtx.fillStyle = '#000000';
+                manualCtx.strokeStyle = color;
+                manualCtx.lineWidth = 4;
+                manualCtx.font = 'bold 16px Arial';
+                manualCtx.strokeText(labels[boundary], 10, y - 10);
+                manualCtx.fillStyle = '#FFFFFF';
+                manualCtx.fillText(labels[boundary], 10, y - 10);
+            }
+        }
+
+        function handleCanvasMouseDown(e) {
+            const rect = manualCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // Check if clicking on any handle or line
+            for (const [boundary, boundaryY] of Object.entries(boundaries)) {
+                const handleX = manualCanvas.width - 30;
+                const handleDistance = Math.sqrt(Math.pow(x - handleX, 2) + Math.pow(y - boundaryY, 2));
+                const lineDistance = Math.abs(y - boundaryY);
+                
+                // Allow clicking on handle or anywhere on the line
+                if (handleDistance <= 15 || lineDistance <= 8) {
+                    isDragging = boundary;
+                    manualCanvas.style.cursor = 'grabbing';
+                    break;
+                }
+            }
+        }
+
+        function handleCanvasMouseMove(e) {
+            const rect = manualCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (isDragging) {
+                // Update boundary position
+                boundaries[isDragging] = Math.max(10, Math.min(manualCanvas.height - 10, y));
+                drawManualCanvas();
+                updateManualResults();
+            } else {
+                // Check if hovering over handle or line
+                let overInteractive = false;
+                for (const [boundary, boundaryY] of Object.entries(boundaries)) {
+                    const handleX = manualCanvas.width - 30;
+                    const handleDistance = Math.sqrt(Math.pow(x - handleX, 2) + Math.pow(y - boundaryY, 2));
+                    const lineDistance = Math.abs(y - boundaryY);
+                    
+                    if (handleDistance <= 15 || lineDistance <= 8) {
+                        overInteractive = true;
+                        break;
+                    }
+                }
+                manualCanvas.style.cursor = overInteractive ? 'grab' : 'crosshair';
+            }
+        }
+
+        function handleCanvasMouseUp() {
+            isDragging = null;
+            manualCanvas.style.cursor = 'crosshair';
+        }
+
+        function resetBoundaries() {
+            if (analysisResult && analysisResult.boundaries) {
+                boundaries.plasma_top_y = analysisResult.boundaries.plasma_top?.y_position || 50;
+                boundaries.rbc_top_y = analysisResult.boundaries.rbc_top?.y_position || 120;
+                boundaries.rbc_bottom_y = analysisResult.boundaries.rbc_bottom?.y_position || 180;
+                drawManualCanvas();
+                updateManualResults();
+            }
+        }
+
+        function updateManualResults() {
+            // Calculate PCV
+            const totalHeight = boundaries.rbc_bottom_y - boundaries.plasma_top_y;
+            const packedHeight = boundaries.rbc_bottom_y - boundaries.rbc_top_y;
+            const pcv = totalHeight > 0 ? (packedHeight / totalHeight) * 100 : 0;
+            const hemoglobin = pcv / 3;
+            
+            // Update displays
+            document.getElementById('manualPcvValue').textContent = `${pcv.toFixed(1)}%`;
+            document.getElementById('manualHbValue').textContent = `${hemoglobin.toFixed(1)} g/dL`;
+            
+            // Update measurements
+            const measurements = document.getElementById('boundaryMeasurements');
+            measurements.innerHTML = `
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center">
+                        <div class="w-3 h-3 rounded-full mr-2 bg-yellow-400"></div>
+                        <span>Plasma Top</span>
+                    </div>
+                    <span class="font-mono text-gray-600">Y: ${Math.round(boundaries.plasma_top_y)}px</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center">
+                        <div class="w-3 h-3 rounded-full mr-2 bg-green-500"></div>
+                        <span>RBC Top</span>
+                    </div>
+                    <span class="font-mono text-gray-600">Y: ${Math.round(boundaries.rbc_top_y)}px</span>
+                </div>
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center">
+                        <div class="w-3 h-3 rounded-full mr-2 bg-red-500"></div>
+                        <span>RBC Bottom</span>
+                    </div>
+                    <span class="font-mono text-gray-600">Y: ${Math.round(boundaries.rbc_bottom_y)}px</span>
+                </div>
+                <div class="border-t pt-2 mt-2">
+                    <div class="flex justify-between text-gray-700 font-semibold">
+                        <span>Total Height:</span>
+                        <span>${Math.round(totalHeight)}px</span>
+                    </div>
+                    <div class="flex justify-between text-gray-700 font-semibold">
+                        <span>Packed Height:</span>
+                        <span>${Math.round(packedHeight)}px</span>
+                    </div>
+                </div>
+            `;
+            
+            // Update clinical interpretation
+            const pcvInterp = document.getElementById('manualPcvInterpretation');
+            const hbInterp = document.getElementById('manualHbInterpretation');
+            
+            pcvInterp.innerHTML = `<strong>PCV:</strong> ${pcv.toFixed(1)}% - ${getPcvInterpretation(pcv)}`;
+            hbInterp.innerHTML = `<strong>Hb:</strong> ${hemoglobin.toFixed(1)} g/dL - ${getHbInterpretation(hemoglobin)}`;
+        }
+
+        function displayWarnings(warnings) {
+            const warningsSection = document.getElementById('warningsSection');
+            const warningsList = document.getElementById('warningsList');
+            
+            let html = '';
+            warnings.forEach(warning => {
+                html += `<li class="flex items-start space-x-2">
+                    <span class="text-amber-600">•</span>
+                    <span>${warning}</span>
+                </li>`;
+            });
+            
+            warningsList.innerHTML = html;
+            warningsSection.classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>

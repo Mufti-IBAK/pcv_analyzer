@@ -1,0 +1,12 @@
+flask==3.0.2
+werkzeug==3.0.1
+opencv-python==4.9.0.80
+numpy==1.26.4
+matplotlib==3.8.3
+pillow==10.2.0
+scipy==1.12.0
+scikit-image==0.22.0
+pathlib
+argparse
+uuid
+json5==0.9.14
