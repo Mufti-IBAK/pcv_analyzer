@@ -4,6 +4,7 @@ Multi-Stage Hybrid Analysis Algorithm with Robust Detection
 Dr. Mufti & Team - Professional Medical Image Analysis
 """
 
+import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -48,6 +49,9 @@ class EnhancedPCVAnalyzer:
     def __init__(self, debug_mode: bool = False):
         self.debug_mode = debug_mode
         self.debug_images = {}
+        self.training_data = []
+        self.training_file = 'manual_corrections.json'
+        self._load_training_data()
         
     def analyze_image(self, image_path: str) -> AnalysisResult:
         """Main analysis pipeline"""
@@ -174,6 +178,32 @@ class EnhancedPCVAnalyzer:
                 warnings=[], success=False, error_message=str(e)
             )
     
+    def save_manual_correction(self, correction_data: dict):
+        """Save manual correction data for training"""
+        import json
+        import datetime
+        
+        correction_data['timestamp'] = datetime.datetime.now().isoformat()
+        self.training_data.append(correction_data)
+        
+        try:
+            with open(self.training_file, 'w') as f:
+                json.dump(self.training_data, f, indent=2)
+        except Exception as e:
+            print(f"Failed to save training data: {e}")
+    
+    def _load_training_data(self):
+        """Load existing training data"""
+        import json
+        
+        try:
+            if os.path.exists(self.training_file):
+                with open(self.training_file, 'r') as f:
+                    self.training_data = json.load(f)
+        except Exception as e:
+            print(f"Failed to load training data: {e}")
+            self.training_data = []
+    
     def _preprocess_image(self, image: np.ndarray) -> np.ndarray:
         """Enhanced image preprocessing with multiple techniques"""
         # Noise reduction with edge preservation
@@ -262,10 +292,19 @@ class EnhancedPCVAnalyzer:
         if w > h:  # Horizontal tube
             rotated_image = cv2.rotate(image, cv2.ROTATE_90_COUNTERCLOCKWISE)
             new_height, new_width = rotated_image.shape[:2]
-            new_x = y
-            new_y = new_width - (x + w)
-            new_w = h
-            new_h = w
+            
+            # Fix coordinate transformation for 90-degree counterclockwise rotation
+            new_x = max(0, y)
+            new_y = max(0, new_width - (x + w))
+            new_w = min(h, new_width - new_x)
+            new_h = min(w, new_height - new_y)
+            
+            # Ensure valid bounds
+            if new_x + new_w > new_width:
+                new_w = new_width - new_x
+            if new_y + new_h > new_height:
+                new_h = new_height - new_y
+                
             new_roi = (new_x, new_y, new_w, new_h)
             return self._ensure_vertical_orientation_advanced(rotated_image, new_roi)
         
@@ -277,9 +316,16 @@ class EnhancedPCVAnalyzer:
         if plasticine_top_score > plasticine_bottom_score + 0.2:
             rotated_image = cv2.rotate(image, cv2.ROTATE_180)
             new_height, new_width = rotated_image.shape[:2]
-            new_x = new_width - (x + w)
-            new_y = new_height - (y + h)
-            new_roi = (new_x, new_y, w, h)
+            
+            # Fix coordinate transformation for 180-degree rotation
+            new_x = max(0, min(new_width - w, new_width - (x + w)))
+            new_y = max(0, min(new_height - h, new_height - (y + h)))
+            
+            # Ensure valid bounds
+            new_w = min(w, new_width - new_x)
+            new_h = min(h, new_height - new_y)
+            
+            new_roi = (new_x, new_y, new_w, new_h)
             return rotated_image, new_roi
         
         return image, roi

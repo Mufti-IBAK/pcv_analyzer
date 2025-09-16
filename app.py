@@ -33,13 +33,22 @@ ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff'}
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-def image_to_base64(image_array):
-    """Convert numpy image array to base64 string"""
-    if len(image_array.shape) == 3:
+def image_to_base64(image_array, max_size=800):
+    """Convert numpy image array to base64 string with size optimization"""
+    # Resize for display if too large
+    display_img = image_array.copy()
+    h, w = display_img.shape[:2]
+    
+    if h > max_size or w > max_size:
+        scale = max_size / max(h, w)
+        new_h, new_w = int(h * scale), int(w * scale)
+        display_img = cv2.resize(display_img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    
+    if len(display_img.shape) == 3:
         # Convert RGB to BGR for OpenCV
-        image_bgr = cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR)
+        image_bgr = cv2.cvtColor(display_img, cv2.COLOR_RGB2BGR)
     else:
-        image_bgr = image_array
+        image_bgr = display_img
     
     # Encode to PNG
     _, buffer = cv2.imencode('.png', image_bgr)
@@ -119,7 +128,7 @@ def upload_file():
 
 @app.route('/manual_correction', methods=['POST'])
 def manual_correction():
-    """Handle manual boundary correction"""
+    """Handle manual boundary correction and save training data"""
     try:
         data = request.json
         
@@ -137,6 +146,18 @@ def manual_correction():
         
         pcv = (packed_height / total_height) * 100.0
         hemoglobin = pcv / 3.0
+        
+        # Save training data if requested
+        if data.get('save_training', False):
+            analyzer.save_manual_correction({
+                'plasma_top_y': plasma_top_y,
+                'rbc_top_y': rbc_top_y,
+                'rbc_bottom_y': rbc_bottom_y,
+                'pcv': pcv,
+                'hemoglobin': hemoglobin,
+                'total_height': total_height,
+                'packed_height': packed_height
+            })
         
         # Validate ranges
         warnings = []
