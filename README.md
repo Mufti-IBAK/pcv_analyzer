@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # 🐍 Enhanced PCV Analyzer - Python Version
 
 **Professional Medical Image Analysis with Multi-Stage Hybrid Detection**
@@ -247,3 +248,7 @@ The Python version provides:
 ---
 
 *Enhanced PCV Analyzer v2.0 - Python Powered Professional Medical Analysis*
+=======
+# pcv_analyzer
+Professional Medical PCV Analyzer with AI-powered detection
+>>>>>>> ec4ee32a585db95a6ae8d21c5f6fb384b4a12bae
