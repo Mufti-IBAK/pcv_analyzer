@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manual Correction Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f0f0f0;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .canvas-container {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            margin: 20px 0;
+            background: #f9f9f9;
+        }
+        
+        canvas {
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            cursor: crosshair;
+        }
+        
+        .results {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .result-card {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #007bff;
+        }
+        
+        .boundary-info {
+            margin: 10px 0;
+            padding: 5px;
+            background: white;
+            border-radius: 4px;
+        }
+        
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        
+        button:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧬 PCV Manual Correction Test</h1>
+        <p>This is a test interface for the manual correction of PCV boundaries.</p>
+        
+        <div class="canvas-container">
+            <h3>Manual Boundary Adjustment</h3>
+            <p>Drag the colored lines to adjust the boundaries:</p>
+            <ul>
+                <li><span style="color: #FFD700;">●</span> <strong>Gold</strong>: Plasma Top</li>
+                <li><span style="color: #22C55E;">●</span> <strong>Green</strong>: RBC Top</li>
+                <li><span style="color: #EF4444;">●</span> <strong>Red</strong>: RBC Bottom</li>
+            </ul>
+            <canvas id="manualCanvas" width="600" height="400"></canvas>
+            <br>
+            <button onclick="resetBoundaries()">Reset to Defaults</button>
+            <button onclick="testDraw()">Test Draw</button>
+        </div>
+        
+        <div class="results">
+            <div class="result-card">
+                <h3>📊 PCV Results</h3>
+                <div><strong>PCV:</strong> <span id="pcvValue">0.0%</span></div>
+                <div><strong>Hemoglobin:</strong> <span id="hbValue">0.0 g/dL</span></div>
+            </div>
+            
+            <div class="result-card">
+                <h3>📏 Measurements</h3>
+                <div id="measurements"></div>
+            </div>
+        </div>
+        
+        <div class="boundary-info">
+            <h3>🎯 Boundary Positions</h3>
+            <div>Plasma Top Y: <span id="plasmaY">0</span>px</div>
+            <div>RBC Top Y: <span id="rbcTopY">0</span>px</div>
+            <div>RBC Bottom Y: <span id="rbcBottomY">0</span>px</div>
+        </div>
+    </div>
+
+    <script>
+        // Canvas and context
+        const canvas = document.getElementById('manualCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Boundary positions
+        let boundaries = {
+            plasma_top_y: 80,
+            rbc_top_y: 160,
+            rbc_bottom_y: 280
+        };
+        
+        // Dragging state
+        let isDragging = null;
+        
+        // Boundary configuration
+        const boundaryConfig = {
+            plasma_top_y: { color: '#FFD700', label: 'Plasma Top' },
+            rbc_top_y: { color: '#22C55E', label: 'RBC Top' },
+            rbc_bottom_y: { color: '#EF4444', label: 'RBC Bottom' }
+        };
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Initializing manual correction test...');
+            
+            // Add event listeners
+            canvas.addEventListener('mousedown', handleMouseDown);
+            canvas.addEventListener('mousemove', handleMouseMove);
+            canvas.addEventListener('mouseup', handleMouseUp);
+            canvas.addEventListener('mouseleave', handleMouseUp);
+            
+            // Draw initial canvas
+            drawCanvas();
+            updateResults();
+        });
+        
+        function drawCanvas() {
+            console.log('🎨 Drawing canvas...');
+            
+            // Clear canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw background grid
+            drawGrid();
+            
+            // Draw sample tube background
+            drawSampleTube();
+            
+            // Draw boundaries
+            drawBoundaries();
+            
+            console.log('✅ Canvas drawn successfully');
+        }
+        
+        function drawGrid() {
+            ctx.strokeStyle = '#e0e0e0';
+            ctx.lineWidth = 1;
+            
+            // Vertical lines
+            for (let x = 0; x <= canvas.width; x += 20) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, canvas.height);
+                ctx.stroke();
+            }
+            
+            // Horizontal lines
+            for (let y = 0; y <= canvas.height; y += 20) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+                ctx.stroke();
+            }
+        }
+        
+        function drawSampleTube() {
+            // Draw a simple tube representation
+            const tubeX = 200;
+            const tubeWidth = 200;
+            const tubeY = 40;
+            const tubeHeight = 320;
+            
+            // Tube outline
+            ctx.strokeStyle = '#666';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(tubeX, tubeY, tubeWidth, tubeHeight);
+            
+            // Sample layers (just for visual reference)
+            const plasma = boundaries.rbc_top_y - boundaries.plasma_top_y;
+            const rbc = boundaries.rbc_bottom_y - boundaries.rbc_top_y;
+            
+            // Plasma layer (light yellow)
+            ctx.fillStyle = 'rgba(255, 255, 200, 0.6)';
+            ctx.fillRect(tubeX + 2, boundaries.plasma_top_y, tubeWidth - 4, plasma);
+            
+            // RBC layer (dark red)
+            ctx.fillStyle = 'rgba(200, 50, 50, 0.6)';
+            ctx.fillRect(tubeX + 2, boundaries.rbc_top_y, tubeWidth - 4, rbc);
+            
+            // Plasticine at bottom (blue)
+            ctx.fillStyle = 'rgba(50, 50, 200, 0.6)';
+            ctx.fillRect(tubeX + 2, boundaries.rbc_bottom_y, tubeWidth - 4, tubeY + tubeHeight - boundaries.rbc_bottom_y);
+        }
+        
+        function drawBoundaries() {
+            for (const [boundaryName, yPos] of Object.entries(boundaries)) {
+                const config = boundaryConfig[boundaryName];
+                if (!config) continue;
+                
+                console.log(`📍 Drawing ${boundaryName} at y=${yPos}`);
+                
+                // Draw main boundary line
+                ctx.strokeStyle = config.color;
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(0, yPos);
+                ctx.lineTo(canvas.width, yPos);
+                ctx.stroke();
+                
+                // Draw drag handle
+                const handleX = canvas.width - 30;
+                
+                // Handle background
+                ctx.fillStyle = config.color;
+                ctx.beginPath();
+                ctx.arc(handleX, yPos, 15, 0, 2 * Math.PI);
+                ctx.fill();
+                
+                // Handle border
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                
+                // Inner dot
+                ctx.fillStyle = '#FFFFFF';
+                ctx.beginPath();
+                ctx.arc(handleX, yPos, 6, 0, 2 * Math.PI);
+                ctx.fill();
+                
+                // Draw label
+                ctx.fillStyle = '#000000';
+                ctx.font = 'bold 14px Arial';
+                const labelWidth = ctx.measureText(config.label).width;
+                
+                // Label background
+                ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                ctx.fillRect(10, yPos - 25, labelWidth + 10, 20);
+                
+                // Label border
+                ctx.strokeStyle = config.color;
+                ctx.lineWidth = 1;
+                ctx.strokeRect(10, yPos - 25, labelWidth + 10, 20);
+                
+                // Label text
+                ctx.fillStyle = config.color;
+                ctx.fillText(config.label, 15, yPos - 10);
+            }
+        }
+        
+        function handleMouseDown(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            console.log(`🖱️ Mouse down at (${x}, ${y})`);
+            
+            // Check if clicking near any boundary
+            const tolerance = 25;
+            
+            for (const [boundaryName, boundaryY] of Object.entries(boundaries)) {
+                const distance = Math.abs(y - boundaryY);
+                console.log(`📏 Distance to ${boundaryName}: ${distance}px`);
+                
+                if (distance <= tolerance) {
+                    isDragging = boundaryName;
+                    canvas.style.cursor = 'ns-resize';
+                    console.log(`✅ Started dragging: ${boundaryName}`);
+                    e.preventDefault();
+                    return;
+                }
+            }
+        }
+        
+        function handleMouseMove(e) {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            if (isDragging) {
+                // Update boundary position
+                const newY = Math.max(20, Math.min(canvas.height - 20, y));
+                boundaries[isDragging] = newY;
+                
+                // Enforce proper order
+                enforceOrder();
+                
+                console.log(`🔄 Updated ${isDragging} to ${newY}`);
+                
+                drawCanvas();
+                updateResults();
+            } else {
+                // Update cursor for hover
+                const tolerance = 25;
+                let nearBoundary = false;
+                
+                for (const boundaryY of Object.values(boundaries)) {
+                    if (Math.abs(y - boundaryY) <= tolerance) {
+                        nearBoundary = true;
+                        break;
+                    }
+                }
+                
+                canvas.style.cursor = nearBoundary ? 'ns-resize' : 'crosshair';
+            }
+        }
+        
+        function handleMouseUp(e) {
+            if (isDragging) {
+                console.log(`✅ Finished dragging: ${isDragging}`);
+                isDragging = null;
+                canvas.style.cursor = 'crosshair';
+            }
+        }
+        
+        function enforceOrder() {
+            const minSpacing = 15;
+            
+            // Ensure plasma_top < rbc_top < rbc_bottom with minimum spacing
+            if (boundaries.plasma_top_y >= boundaries.rbc_top_y - minSpacing) {
+                boundaries.plasma_top_y = boundaries.rbc_top_y - minSpacing;
+            }
+            if (boundaries.rbc_top_y >= boundaries.rbc_bottom_y - minSpacing) {
+                boundaries.rbc_top_y = boundaries.rbc_bottom_y - minSpacing;
+            }
+            if (boundaries.rbc_bottom_y <= boundaries.rbc_top_y + minSpacing) {
+                boundaries.rbc_bottom_y = boundaries.rbc_top_y + minSpacing;
+            }
+        }
+        
+        function updateResults() {
+            // Calculate measurements
+            const totalHeight = boundaries.rbc_bottom_y - boundaries.plasma_top_y;
+            const packedHeight = boundaries.rbc_bottom_y - boundaries.rbc_top_y;
+            const pcv = totalHeight > 0 ? (packedHeight / totalHeight) * 100 : 0;
+            const hemoglobin = pcv / 3;
+            
+            // Update displays
+            document.getElementById('pcvValue').textContent = `${pcv.toFixed(1)}%`;
+            document.getElementById('hbValue').textContent = `${hemoglobin.toFixed(1)} g/dL`;
+            
+            // Update measurements
+            document.getElementById('measurements').innerHTML = `
+                <div>Total Height: ${Math.round(totalHeight)}px</div>
+                <div>Packed Height: ${Math.round(packedHeight)}px</div>
+                <div>Plasma Height: ${Math.round(boundaries.rbc_top_y - boundaries.plasma_top_y)}px</div>
+            `;
+            
+            // Update boundary positions
+            document.getElementById('plasmaY').textContent = Math.round(boundaries.plasma_top_y);
+            document.getElementById('rbcTopY').textContent = Math.round(boundaries.rbc_top_y);
+            document.getElementById('rbcBottomY').textContent = Math.round(boundaries.rbc_bottom_y);
+            
+            console.log(`📊 PCV: ${pcv.toFixed(1)}%, Hb: ${hemoglobin.toFixed(1)} g/dL`);
+        }
+        
+        function resetBoundaries() {
+            boundaries = {
+                plasma_top_y: 80,
+                rbc_top_y: 160,
+                rbc_bottom_y: 280
+            };
+            drawCanvas();
+            updateResults();
+            console.log('🔄 Boundaries reset to defaults');
+        }
+        
+        function testDraw() {
+            console.log('🧪 Running test draw...');
+            drawCanvas();
+            updateResults();
+            console.log('✅ Test draw complete');
+        }
+    </script>
+</body>
+</html>

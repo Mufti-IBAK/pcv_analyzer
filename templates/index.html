@@ -581,43 +581,86 @@
         }
 
         function setupManualCorrection(data) {
-            console.log('Setting up manual correction:', data);
+            console.log('🔧 Setting up manual correction with data:', data);
             
-            // Always ensure we have tube_roi image, use oriented_image as fallback
-            const imageSource = data.debug_images?.tube_roi || data.debug_images?.oriented_image || data.debug_images?.original;
+            // Use any available image - prioritize tube_roi but accept any debug image
+            let imageSource = null;
+            if (data.debug_images) {
+                imageSource = data.debug_images.tube_roi || 
+                             data.debug_images.oriented_image || 
+                             data.debug_images.original || 
+                             data.debug_images.annotated;
+                
+                // If still no image, try any available debug image
+                if (!imageSource) {
+                    const imageKeys = Object.keys(data.debug_images);
+                    if (imageKeys.length > 0) {
+                        imageSource = data.debug_images[imageKeys[0]];
+                        console.log('📸 Using fallback image:', imageKeys[0]);
+                    }
+                }
+            }
             
             if (imageSource) {
+                console.log('📷 Loading image for manual correction...');
                 const img = new Image();
                 img.onload = function() {
-                    console.log('Image loaded for manual correction:', img.width, 'x', img.height);
+                    console.log('✅ Image loaded successfully:', img.width, 'x', img.height);
                     canvasImage = img;
-                    manualCanvas.width = img.width;
-                    manualCanvas.height = img.height;
                     
-                    // Initialize boundaries based on automatic detection or defaults
-                    if (data.boundaries && Object.keys(data.boundaries).length > 0) {
-                        console.log('Using detected boundaries:', data.boundaries);
-                        boundaries.plasma_top_y = data.boundaries.plasma_top?.y_position || Math.floor(img.height * 0.1);
-                        boundaries.rbc_top_y = data.boundaries.rbc_top?.y_position || Math.floor(img.height * 0.3);
-                        boundaries.rbc_bottom_y = data.boundaries.rbc_bottom?.y_position || Math.floor(img.height * 0.8);
-                    } else {
-                        console.log('Using default boundary positions');
-                        // Use proportional defaults based on image height
-                        boundaries.plasma_top_y = Math.floor(img.height * 0.1);
-                        boundaries.rbc_top_y = Math.floor(img.height * 0.3);
-                        boundaries.rbc_bottom_y = Math.floor(img.height * 0.8);
+                    // Set canvas size to match image (with reasonable limits)
+                    const maxWidth = 800;
+                    const maxHeight = 600;
+                    
+                    let canvasWidth = img.width;
+                    let canvasHeight = img.height;
+                    
+                    if (canvasWidth > maxWidth || canvasHeight > maxHeight) {
+                        const scale = Math.min(maxWidth / canvasWidth, maxHeight / canvasHeight);
+                        canvasWidth = Math.floor(canvasWidth * scale);
+                        canvasHeight = Math.floor(canvasHeight * scale);
                     }
                     
-                    console.log('Boundaries set to:', boundaries);
+                    manualCanvas.width = canvasWidth;
+                    manualCanvas.height = canvasHeight;
+                    
+                    console.log('📐 Canvas size set to:', canvasWidth, 'x', canvasHeight);
+                    
+                    // Set default boundaries based on canvas height
+                    boundaries.plasma_top_y = Math.floor(canvasHeight * 0.15);    // 15% from top
+                    boundaries.rbc_top_y = Math.floor(canvasHeight * 0.40);       // 40% from top
+                    boundaries.rbc_bottom_y = Math.floor(canvasHeight * 0.75);    // 75% from top
+                    
+                    console.log('📍 Default boundaries set:', boundaries);
+                    
+                    // Draw the canvas immediately
                     drawManualCanvas();
                     updateManualResults();
                 };
+                
                 img.onerror = function() {
-                    console.error('Failed to load image for manual correction');
+                    console.error('❌ Failed to load image for manual correction');
+                    // Show error message to user
+                    if (manualCtx) {
+                        manualCtx.fillStyle = '#ff0000';
+                        manualCtx.fillRect(0, 0, 400, 100);
+                        manualCtx.fillStyle = '#ffffff';
+                        manualCtx.font = '16px Arial';
+                        manualCtx.fillText('Failed to load image', 10, 30);
+                    }
                 };
+                
                 img.src = imageSource;
             } else {
-                console.error('No suitable image found for manual correction');
+                console.error('❌ No image source found in data');
+                // Create a simple test canvas
+                manualCanvas.width = 400;
+                manualCanvas.height = 300;
+                boundaries.plasma_top_y = 50;
+                boundaries.rbc_top_y = 120;
+                boundaries.rbc_bottom_y = 200;
+                drawManualCanvas();
+                updateManualResults();
             }
         }
 
@@ -641,186 +684,129 @@
         }
 
         function drawMedicalGrid() {
-            // Professional medical measurement grid
-            const gridSpacing = 10; // 10 pixels per mm (approximate)
-            const majorGridSpacing = 50; // Every 5mm as major lines
+            console.log('🎨 Drawing medical grid...');
             
-            // Background
-            manualCtx.fillStyle = '#f8f9fa';
-            manualCtx.fillRect(0, 0, manualCanvas.width, manualCanvas.height);
-            
-            // Minor grid lines (1mm)
-            manualCtx.strokeStyle = '#e9ecef';
-            manualCtx.lineWidth = 0.5;
-            
-            for (let x = 0; x <= manualCanvas.width; x += gridSpacing) {
-                manualCtx.beginPath();
-                manualCtx.moveTo(x, 0);
-                manualCtx.lineTo(x, manualCanvas.height);
-                manualCtx.stroke();
-            }
-            
-            for (let y = 0; y <= manualCanvas.height; y += gridSpacing) {
-                manualCtx.beginPath();
-                manualCtx.moveTo(0, y);
-                manualCtx.lineTo(manualCanvas.width, y);
-                manualCtx.stroke();
-            }
-            
-            // Major grid lines (5mm)
-            manualCtx.strokeStyle = '#dee2e6';
-            manualCtx.lineWidth = 1;
-            
-            for (let x = 0; x <= manualCanvas.width; x += majorGridSpacing) {
-                manualCtx.beginPath();
-                manualCtx.moveTo(x, 0);
-                manualCtx.lineTo(x, manualCanvas.height);
-                manualCtx.stroke();
-            }
-            
-            for (let y = 0; y <= manualCanvas.height; y += majorGridSpacing) {
-                manualCtx.beginPath();
-                manualCtx.moveTo(0, y);
-                manualCtx.lineTo(manualCanvas.width, y);
-                manualCtx.stroke();
-            }
-            
-            // Measurement labels
-            manualCtx.fillStyle = '#6c757d';
-            manualCtx.font = '10px Arial';
-            
-            // Vertical measurements (every 10mm)
-            for (let y = majorGridSpacing * 2; y <= manualCanvas.height; y += majorGridSpacing * 2) {
-                const mm = Math.round((y / gridSpacing));
-                manualCtx.fillText(mm + 'mm', 5, y - 2);
-            }
-            
-            // Horizontal measurements (every 10mm)
-            for (let x = majorGridSpacing * 2; x <= manualCanvas.width; x += majorGridSpacing * 2) {
-                const mm = Math.round((x / gridSpacing));
-                manualCtx.fillText(mm + 'mm', x - 8, 15);
+            try {
+                // Simple background
+                manualCtx.fillStyle = '#f0f0f0';
+                manualCtx.fillRect(0, 0, manualCanvas.width, manualCanvas.height);
+                
+                // Simple grid lines every 20 pixels
+                manualCtx.strokeStyle = '#ddd';
+                manualCtx.lineWidth = 1;
+                
+                // Vertical lines
+                for (let x = 0; x <= manualCanvas.width; x += 20) {
+                    manualCtx.beginPath();
+                    manualCtx.moveTo(x, 0);
+                    manualCtx.lineTo(x, manualCanvas.height);
+                    manualCtx.stroke();
+                }
+                
+                // Horizontal lines
+                for (let y = 0; y <= manualCanvas.height; y += 20) {
+                    manualCtx.beginPath();
+                    manualCtx.moveTo(0, y);
+                    manualCtx.lineTo(manualCanvas.width, y);
+                    manualCtx.stroke();
+                }
+                
+                console.log('✅ Medical grid drawn successfully');
+            } catch (error) {
+                console.error('❌ Error drawing medical grid:', error);
             }
         }
         
         function drawManualCanvas() {
-            if (!canvasImage) return;
+            console.log('🎨 Drawing manual canvas...');
             
-            // Clear canvas
-            manualCtx.clearRect(0, 0, manualCanvas.width, manualCanvas.height);
+            if (!manualCtx) {
+                console.error('❌ No canvas context available');
+                return;
+            }
             
-            // Draw professional medical grid background
-            drawMedicalGrid();
-            
-            // Draw image with slight transparency to make lines more visible
-            manualCtx.globalAlpha = 0.75;
-            manualCtx.drawImage(canvasImage, 0, 0);
-            manualCtx.globalAlpha = 1.0;
-            
-            // Draw enhanced boundary lines across the grid
-            const colors = {
-                plasma_top_y: '#FFD700',    // Gold - Plasma boundary
-                rbc_top_y: '#22C55E',       // Green - RBC top boundary  
-                rbc_bottom_y: '#EF4444'     // Red - RBC bottom boundary
-            };
-            
-            const labels = {
-                plasma_top_y: 'Plasma Top (A)',
-                rbc_top_y: 'RBC Top (B)',
-                rbc_bottom_y: 'RBC Bottom (C)'
-            };
-            
-            for (const [boundary, y] of Object.entries(boundaries)) {
-                const color = colors[boundary];
+            try {
+                // Clear canvas
+                manualCtx.clearRect(0, 0, manualCanvas.width, manualCanvas.height);
                 
-                // Draw full-width measurement line with enhanced visibility
-                manualCtx.shadowColor = 'rgba(0,0,0,0.7)';
-                manualCtx.shadowBlur = 4;
-                manualCtx.shadowOffsetY = 2;
+                // Draw background grid
+                drawMedicalGrid();
                 
-                // Main measurement line
-                manualCtx.strokeStyle = color;
-                manualCtx.lineWidth = 3;
-                manualCtx.setLineDash([]);
-                manualCtx.beginPath();
-                manualCtx.moveTo(0, y);
-                manualCtx.lineTo(manualCanvas.width, y);
-                manualCtx.stroke();
+                // Draw image if available
+                if (canvasImage) {
+                    console.log('🖼️ Drawing background image...');
+                    manualCtx.globalAlpha = 0.6;
+                    manualCtx.drawImage(canvasImage, 0, 0, manualCanvas.width, manualCanvas.height);
+                    manualCtx.globalAlpha = 1.0;
+                } else {
+                    console.log('💳 No background image, using plain background');
+                    manualCtx.fillStyle = '#e8e8e8';
+                    manualCtx.fillRect(0, 0, manualCanvas.width, manualCanvas.height);
+                }
                 
-                // Dashed extension lines for precision
-                manualCtx.setLineDash([5, 5]);
-                manualCtx.strokeStyle = color;
-                manualCtx.lineWidth = 1;
-                manualCtx.globalAlpha = 0.6;
-                manualCtx.beginPath();
-                manualCtx.moveTo(0, y - 3);
-                manualCtx.lineTo(manualCanvas.width, y - 3);
-                manualCtx.moveTo(0, y + 3);
-                manualCtx.lineTo(manualCanvas.width, y + 3);
-                manualCtx.stroke();
-                manualCtx.setLineDash([]);
-                manualCtx.globalAlpha = 1.0;
+                // Draw boundary lines
+                console.log('📏 Drawing boundary lines at:', boundaries);
                 
-                // Reset shadow
-                manualCtx.shadowColor = 'transparent';
-                manualCtx.shadowBlur = 0;
-                manualCtx.shadowOffsetY = 0;
+                const boundaryConfig = {
+                    plasma_top_y: { color: '#FFD700', label: 'Plasma Top' },      // Gold
+                    rbc_top_y: { color: '#22C55E', label: 'RBC Top' },            // Green
+                    rbc_bottom_y: { color: '#EF4444', label: 'RBC Bottom' }       // Red
+                };
                 
-                // Draw measurement handle (enhanced for better UX)
-                const handleX = manualCanvas.width - 35;
+                for (const [boundaryName, yPos] of Object.entries(boundaries)) {
+                    const config = boundaryConfig[boundaryName];
+                    if (!config) continue;
+                    
+                    console.log(`📍 Drawing ${boundaryName} at y=${yPos}`);
+                    
+                    // Draw main boundary line
+                    manualCtx.strokeStyle = config.color;
+                    manualCtx.lineWidth = 4;
+                    manualCtx.beginPath();
+                    manualCtx.moveTo(0, yPos);
+                    manualCtx.lineTo(manualCanvas.width, yPos);
+                    manualCtx.stroke();
+                    
+                    // Draw drag handle (circle at right side)
+                    const handleX = manualCanvas.width - 25;
+                    
+                    // Handle background
+                    manualCtx.fillStyle = config.color;
+                    manualCtx.beginPath();
+                    manualCtx.arc(handleX, yPos, 12, 0, 2 * Math.PI);
+                    manualCtx.fill();
+                    
+                    // Handle border
+                    manualCtx.strokeStyle = '#FFFFFF';
+                    manualCtx.lineWidth = 2;
+                    manualCtx.stroke();
+                    
+                    // Inner dot
+                    manualCtx.fillStyle = '#FFFFFF';
+                    manualCtx.beginPath();
+                    manualCtx.arc(handleX, yPos, 4, 0, 2 * Math.PI);
+                    manualCtx.fill();
+                    
+                    // Draw label
+                    manualCtx.fillStyle = '#000000';
+                    manualCtx.font = 'bold 12px Arial';
+                    const labelWidth = manualCtx.measureText(config.label).width;
+                    
+                    // Label background
+                    manualCtx.fillStyle = 'rgba(255,255,255,0.8)';
+                    manualCtx.fillRect(10, yPos - 20, labelWidth + 10, 16);
+                    
+                    // Label text
+                    manualCtx.fillStyle = config.color;
+                    manualCtx.fillText(config.label, 15, yPos - 8);
+                }
                 
-                // Handle shadow
-                manualCtx.shadowColor = 'rgba(0,0,0,0.3)';
-                manualCtx.shadowBlur = 3;
-                manualCtx.shadowOffsetY = 2;
+                console.log('✅ Manual canvas drawn successfully');
                 
-                // Outer handle circle
-                manualCtx.fillStyle = color;
-                manualCtx.beginPath();
-                manualCtx.arc(handleX, y, 14, 0, 2 * Math.PI);
-                manualCtx.fill();
-                
-                // Handle border
-                manualCtx.strokeStyle = '#FFFFFF';
-                manualCtx.lineWidth = 3;
-                manualCtx.stroke();
-                
-                // Inner handle dot
-                manualCtx.fillStyle = '#FFFFFF';
-                manualCtx.beginPath();
-                manualCtx.arc(handleX, y, 5, 0, 2 * Math.PI);
-                manualCtx.fill();
-                
-                // Reset shadow
-                manualCtx.shadowColor = 'transparent';
-                manualCtx.shadowBlur = 0;
-                manualCtx.shadowOffsetY = 0;
-                
-                // Draw enhanced label with medical precision
-                const labelX = 15;
-                
-                // Label background
-                manualCtx.fillStyle = 'rgba(255,255,255,0.9)';
-                manualCtx.fillRect(labelX - 5, y - 25, 120, 20);
-                
-                // Label border
-                manualCtx.strokeStyle = color;
-                manualCtx.lineWidth = 1;
-                manualCtx.strokeRect(labelX - 5, y - 25, 120, 20);
-                
-                // Label text
-                manualCtx.fillStyle = color;
-                manualCtx.font = 'bold 12px Arial';
-                manualCtx.fillText(labels[boundary], labelX, y - 10);
-                
-                // Measurement value
-                manualCtx.fillStyle = '#374151';
-                manualCtx.font = '10px monospace';
-                const mmValue = Math.round((y / 10)); // Assuming 10px = 1mm
-                manualCtx.fillText(`${mmValue}mm`, labelX, y - 28);
+            } catch (error) {
+                console.error('❌ Error drawing manual canvas:', error);
             }
         }
-
-        function handleCanvasMouseDown(e) {
             e.preventDefault();
             e.stopPropagation();
             
